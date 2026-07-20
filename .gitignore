@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+uploads/
+*.onnx
+*.pth
+*.pt
+*.mp4
+*.avi
+*.mkv
+.DS_Store
+.idea/
+.vscode/
+third_party/YOLOX/

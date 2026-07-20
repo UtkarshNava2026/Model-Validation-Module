@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nava Vision AI Model Validation</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark"></span>
+        <div>
+          <h1>Nava Vision AI Model Validation</h1>
+          <p>Official pre / post-process · weights · classes · experiment</p>
+        </div>
+      </div>
+      <div class="top-meta" id="topMeta">
+        <span class="pill" id="statusPill">idle</span>
+        <span class="meta" id="fpsMeta">FPS —</span>
+        <span class="meta" id="detMeta">Dets —</span>
+      </div>
+    </header>
+
+    <main class="layout">
+      <aside class="panel">
+        <section class="block">
+          <h2>1 · Model files</h2>
+          <label class="field">
+            <span>Weights (.pth / .onnx)</span>
+            <input type="file" id="weightFile" accept=".pth,.pt,.onnx" />
+          </label>
+          <label class="field">
+            <span>Classes (.txt)</span>
+            <input type="file" id="classFile" accept=".txt,.names" />
+          </label>
+          <label class="field">
+            <span>Experiment (.py)</span>
+            <input type="file" id="expFile" accept=".py" />
+          </label>
+          <label class="field row">
+            <span>Device</span>
+            <select id="device">
+              <option value="cpu">CPU</option>
+              <option value="cuda">CUDA</option>
+            </select>
+          </label>
+          <button class="btn primary" id="btnLoad" type="button">Load model</button>
+          <p class="hint" id="loadMsg">Upload YOLOX .pth / .onnx weights, class list, and experiment file.</p>
+        </section>
+
+        <section class="block">
+          <h2>2 · Input source</h2>
+          <div class="tabs tabs-4" role="tablist">
+            <button class="tab active" data-tab="image" type="button">Image</button>
+            <button class="tab" data-tab="folder" type="button">Folder</button>
+            <button class="tab" data-tab="video" type="button">Video</button>
+            <button class="tab" data-tab="rtsp" type="button">RTSP</button>
+          </div>
+
+          <div class="tab-pane active" id="pane-image">
+            <label class="field">
+              <span>Image file</span>
+              <input type="file" id="imageFile" accept="image/*" />
+            </label>
+            <button class="btn" id="btnOpenImage" type="button">Open image</button>
+          </div>
+
+          <div class="tab-pane" id="pane-folder">
+            <label class="field">
+              <span>Image folder (upload)</span>
+              <input type="file" id="folderFiles" accept="image/*" multiple webkitdirectory directory />
+            </label>
+            <button class="btn" id="btnOpenFolder" type="button">Open folder</button>
+            <label class="field" style="margin-top:12px">
+              <span>Or server directory path</span>
+              <input type="text" id="dirPath" placeholder="/path/to/images" />
+            </label>
+            <button class="btn" id="btnOpenDirPath" type="button">Open path</button>
+          </div>
+
+          <div class="tab-pane" id="pane-video">
+            <label class="field">
+              <span>Video file</span>
+              <input type="file" id="videoFile" accept="video/*" />
+            </label>
+            <button class="btn" id="btnOpenVideo" type="button">Open video</button>
+          </div>
+
+          <div class="tab-pane" id="pane-rtsp">
+            <label class="field">
+              <span>RTSP / URL (live or playback)</span>
+              <input type="text" id="rtspUrl" placeholder="rtsp://user:pass@host:554/stream" />
+            </label>
+            <button class="btn" id="btnOpenRtsp" type="button">Connect</button>
+          </div>
+          <p class="hint" id="sourceMsg"></p>
+        </section>
+
+        <section class="block">
+          <h2>3 · Thresholds</h2>
+          <label class="field">
+            <span class="slider-label">
+              Confidence
+              <strong id="confVal">0.25</strong>
+            </span>
+            <input type="range" id="confSlider" min="0.05" max="0.95" step="0.01" value="0.25" />
+          </label>
+          <label class="field">
+            <span class="slider-label">
+              NMS
+              <strong id="nmsVal">0.45</strong>
+            </span>
+            <input type="range" id="nmsSlider" min="0.05" max="0.95" step="0.01" value="0.45" />
+          </label>
+        </section>
+      </aside>
+
+      <section class="viewer">
+        <div class="stage">
+          <img id="preview" alt="Inference preview" />
+          <div class="stage-empty" id="stageEmpty">
+            <strong>No frame yet</strong>
+            <span>Load a model, then open an image, folder, video, or RTSP source.</span>
+          </div>
+        </div>
+        <div class="timeline" id="timelineWrap">
+          <span class="time-label" id="timeCurrent">0:00</span>
+          <input
+            type="range"
+            id="timeline"
+            min="0"
+            max="0"
+            step="1"
+            value="0"
+            disabled
+            title="Scrub video timeline"
+          />
+          <span class="time-label" id="timeDuration">0:00</span>
+        </div>
+        <div class="gallery-nav" id="galleryNav" hidden>
+          <button class="btn icon" id="btnPrevImage" type="button" title="Previous image (←)">← Prev</button>
+          <span class="gallery-info" id="galleryInfo">image —</span>
+          <button class="btn icon" id="btnNextImage" type="button" title="Next image (→)">Next →</button>
+        </div>
+        <div class="controls">
+          <button class="btn icon" id="btnPlay" type="button" title="Play">▶ Play</button>
+          <button class="btn icon" id="btnPause" type="button" title="Pause">❚❚ Pause</button>
+          <button class="btn icon ghost" id="btnStop" type="button" title="Stop">■ Stop</button>
+          <label class="speed-field">
+            <span>Speed</span>
+            <select id="speedSelect" title="Playback speed">
+              <option value="0.25">0.25×</option>
+              <option value="0.5">0.5×</option>
+              <option value="0.75">0.75×</option>
+              <option value="1" selected>1×</option>
+              <option value="1.25">1.25×</option>
+              <option value="1.5">1.5×</option>
+              <option value="2">2×</option>
+              <option value="3">3×</option>
+              <option value="4">4×</option>
+              <option value="8">8×</option>
+            </select>
+          </label>
+          <span class="frame-info" id="frameInfo">frame —</span>
+        </div>
+        <div class="classes" id="classChips"></div>
+      </section>
+    </main>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
