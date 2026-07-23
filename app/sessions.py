@@ -59,6 +59,13 @@ class UserSession:
                 torch.cuda.empty_cache()
         except Exception:
             pass
+        # Remove ephemeral media / weights for this session (not permanent uploads/)
+        try:
+            from app.storage import clear_session_scratch
+
+            clear_session_scratch(self.session_id)
+        except Exception:
+            pass
 
 
 class SessionManager:

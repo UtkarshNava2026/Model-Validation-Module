@@ -88,10 +88,15 @@
 
           <div class="tab-pane" id="pane-video">
             <label class="field">
-              <span>Video file</span>
+              <span>Video file (temp only — not kept in uploads/)</span>
               <input type="file" id="videoFile" accept="video/*" />
             </label>
             <button class="btn" id="btnOpenVideo" type="button">Open video</button>
+            <label class="field" style="margin-top:12px">
+              <span>Or server path (no copy — uses your disk)</span>
+              <input type="text" id="videoPath" placeholder="/home/you/videos/clip.mp4" />
+            </label>
+            <button class="btn" id="btnOpenVideoPath" type="button">Open path</button>
           </div>
 
           <div class="tab-pane" id="pane-rtsp">

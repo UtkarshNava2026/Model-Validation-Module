@@ -7,9 +7,7 @@ Multi-user: each browser gets an isolated session (own model / stream / controls
 from __future__ import annotations
 
 import logging
-import shutil
 import time
-import uuid
 from pathlib import Path
 from typing import Optional
 
@@ -19,15 +17,14 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from app.sessions import UserSession, session_manager
+from app.storage import save_bytes_stream, save_gallery
 from app.yolox.predictor import YOLOXPredictor
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("model-validation")
 
 ROOT = Path(__file__).resolve().parent.parent
-UPLOAD_DIR = ROOT / "uploads"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(title="Nava Vision AI Model Validation", version="1.1.0")
 
@@ -56,6 +53,12 @@ class RtspBody(BaseModel):
 
 class DirBody(BaseModel):
     path: str
+
+
+class MediaPathBody(BaseModel):
+    """Open a video/image already on server disk — no copy into uploads/."""
+    path: str
+    source_type: str = "video"  # video | image
 
 
 class GotoImageBody(BaseModel):
@@ -105,28 +108,8 @@ def require_session(
 
 
 async def _save_upload(file: UploadFile, prefix: str, session_id: str) -> Path:
-    sess_dir = UPLOAD_DIR / session_id[:16]
-    sess_dir.mkdir(parents=True, exist_ok=True)
-    suffix = Path(file.filename or "file").suffix
-    dest = sess_dir / f"{prefix}_{uuid.uuid4().hex}{suffix}"
-    with dest.open("wb") as f:
-        shutil.copyfileobj(file.file, f)
-    return dest
-
-
-async def _save_gallery_uploads(files: list[UploadFile], session_id: str) -> list[Path]:
-    gallery_dir = UPLOAD_DIR / session_id[:16] / f"gallery_{uuid.uuid4().hex}"
-    gallery_dir.mkdir(parents=True, exist_ok=True)
-    saved: list[Path] = []
-    for file in files:
-        name = Path(file.filename or "image.jpg").name
-        dest = gallery_dir / name
-        if dest.exists():
-            dest = gallery_dir / f"{dest.stem}_{uuid.uuid4().hex[:8]}{dest.suffix}"
-        with dest.open("wb") as f:
-            shutil.copyfileobj(file.file, f)
-        saved.append(dest)
-    return saved
+    """Save into session temp scratch (deleted when session ends)."""
+    return save_bytes_stream(file.file, session_id, prefix, file.filename)
 
 
 @app.get("/")
@@ -249,7 +232,7 @@ async def open_folder_upload(
     if not files:
         raise HTTPException(status_code=400, detail="No files uploaded")
     try:
-        saved = await _save_gallery_uploads(files, sess.session_id)
+        saved = save_gallery(files, sess.session_id)
         image_paths = [
             str(p)
             for p in saved
@@ -275,10 +258,49 @@ async def open_directory_path(
     if not path:
         raise HTTPException(status_code=400, detail="Directory path is empty")
     try:
+        # Reads images in-place from user/server storage — no copy
         sess.processor.open_image_directory(path)
         return _session_response({"ok": True, **sess.processor.status()}, sess)
     except Exception as exc:
         logger.exception("Failed to open directory path")
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/source/path")
+async def open_media_path(
+    body: MediaPathBody, sess: UserSession = Depends(require_session)
+):
+    """
+    Open a video/image from an existing server filesystem path.
+    No file is copied into uploads/ — uses the user's persistent storage directly.
+    """
+    path = Path(body.path.strip()).expanduser().resolve()
+    st = body.source_type if body.source_type in ("video", "image") else "video"
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=400, detail=f"File not found: {path}")
+    if st == "video" and path.suffix.lower() not in {
+        ".mp4",
+        ".avi",
+        ".mkv",
+        ".mov",
+        ".webm",
+        ".m4v",
+    }:
+        # Still allow open — OpenCV may support more containers
+        logger.info("Opening non-standard video extension: %s", path.suffix)
+    try:
+        sess.processor.open_source(str(path), st)
+        return _session_response(
+            {
+                "ok": True,
+                "message": "Opened from server path (no copy)",
+                "path": str(path),
+                **sess.processor.status(),
+            },
+            sess,
+        )
+    except Exception as exc:
+        logger.exception("Failed to open media path")
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 

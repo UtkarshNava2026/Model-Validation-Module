@@ -13,11 +13,13 @@
     folderFiles: $("folderFiles"),
     dirPath: $("dirPath"),
     videoFile: $("videoFile"),
+    videoPath: $("videoPath"),
     rtspUrl: $("rtspUrl"),
     btnOpenImage: $("btnOpenImage"),
     btnOpenFolder: $("btnOpenFolder"),
     btnOpenDirPath: $("btnOpenDirPath"),
     btnOpenVideo: $("btnOpenVideo"),
+    btnOpenVideoPath: $("btnOpenVideoPath"),
     btnOpenRtsp: $("btnOpenRtsp"),
     btnPrevImage: $("btnPrevImage"),
     btnNextImage: $("btnNextImage"),
@@ -313,6 +315,36 @@
     }
   }
 
+  async function openVideoPath() {
+    if (!modelReady) {
+      setHint(els.sourceMsg, "Load the model first.", "error");
+      return;
+    }
+    const path = (els.videoPath && els.videoPath.value.trim()) || "";
+    if (!path) {
+      setHint(els.sourceMsg, "Enter a server video path.", "error");
+      return;
+    }
+    setHint(els.sourceMsg, "Opening video from disk (no copy)…");
+    try {
+      const data = await api("/api/source/path", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path, source_type: "video" }),
+      });
+      setHint(els.sourceMsg, "Video opened from server path (not saved to uploads).", "ok");
+      startMjpeg();
+      await api("/api/control/speed", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ speed: Number(els.speedSelect.value) }),
+      });
+      updateStatusUI(data);
+    } catch (err) {
+      setHint(els.sourceMsg, err.message, "error");
+    }
+  }
+
   async function stepImage(direction) {
     const endpoint =
       direction === "next" ? "/api/control/next-image" : "/api/control/prev-image";
@@ -523,6 +555,9 @@
   els.btnOpenFolder.addEventListener("click", openFolderUpload);
   els.btnOpenDirPath.addEventListener("click", openDirPath);
   els.btnOpenVideo.addEventListener("click", () => openFileSource(els.videoFile, "video"));
+  if (els.btnOpenVideoPath) {
+    els.btnOpenVideoPath.addEventListener("click", openVideoPath);
+  }
   els.btnOpenRtsp.addEventListener("click", openRtsp);
   els.btnPrevImage.addEventListener("click", () => stepImage("prev"));
   els.btnNextImage.addEventListener("click", () => stepImage("next"));

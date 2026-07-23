@@ -61,6 +61,12 @@ python run.py
 
 Open **http://localhost:7860**
 
+### Storage (no permanent video archive)
+
+- Browser uploads go to **session temp** (`/tmp/nava-model-validation/...`) and are **deleted when the session ends**
+- Prefer **server path** for large videos/images already on disk → **no copy**, opens in place (faster, less disk use)
+- Inference recordings still go to `outputs/recordings/` when you enable download
+
 ### Download inference video
 
 On video / RTSP: turn on **Download inference video**, set duration in seconds (or `0` = until you turn it off), play the stream, then click **Download** when recording finishes.
