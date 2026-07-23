@@ -125,9 +125,9 @@ body {
 
 .layout {
   display: grid;
-  grid-template-columns: 340px 1fr;
+  grid-template-columns: 320px minmax(0, 1fr);
   gap: 18px;
-  align-items: start;
+  align-items: stretch;
 }
 
 .panel,
@@ -313,7 +313,7 @@ input[type="range"] {
 
 .viewer {
   padding: 14px;
-  min-height: 640px;
+  min-height: calc(100vh - 120px);
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -322,7 +322,8 @@ input[type="range"] {
 .stage {
   position: relative;
   flex: 1;
-  min-height: 520px;
+  min-height: min(78vh, 920px);
+  height: min(78vh, 920px);
   border-radius: 12px;
   overflow: hidden;
   background:
@@ -542,11 +543,12 @@ input[type="range"] {
   }
 
   .viewer {
-    min-height: 480px;
+    min-height: calc(100vh - 160px);
   }
 
   .stage {
-    min-height: 360px;
+    min-height: min(62vh, 640px);
+    height: min(62vh, 640px);
   }
 
   .topbar {

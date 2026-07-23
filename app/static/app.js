@@ -115,7 +115,11 @@
   async function api(path, options = {}) {
     const headers = new Headers(options.headers || {});
     if (sessionId) headers.set("X-Session-Id", sessionId);
-    const res = await fetch(path, { ...options, headers });
+    const res = await fetch(path, {
+      ...options,
+      headers,
+      credentials: "same-origin",
+    });
     const data = await res.json().catch(() => ({}));
     if (data.session_id) rememberSession(data.session_id);
     if (!res.ok) {
@@ -126,10 +130,13 @@
   }
 
   async function ensureSession() {
+    const previous = sessionId;
     const data = await api("/api/session", { method: "POST" });
     rememberSession(data.session_id);
     if (els.sessionMeta && data.active_sessions != null) {
-      els.sessionMeta.textContent = `session ${sessionId.slice(0, 8)} · ${data.active_sessions}/${data.max_sessions} users`;
+      const tag = data.resumed || (previous && previous === data.session_id) ? "resumed" : "new";
+      els.sessionMeta.textContent =
+        `session ${sessionId.slice(0, 8)} (${tag}) · ${data.active_sessions}/${data.max_sessions} users`;
     }
     return data;
   }

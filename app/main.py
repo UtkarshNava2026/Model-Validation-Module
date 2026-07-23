@@ -7,11 +7,12 @@ Multi-user: each browser gets an isolated session (own model / stream / controls
 from __future__ import annotations
 
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Optional
 
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
+from fastapi import Cookie, Depends, FastAPI, File, Form, Header, HTTPException, Query, Response, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -25,6 +26,8 @@ logger = logging.getLogger("model-validation")
 
 ROOT = Path(__file__).resolve().parent.parent
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+SESSION_COOKIE = "nava_mv_session"
+SESSION_COOKIE_MAX_AGE = int(os.environ.get("SESSION_TTL_SEC", "7200"))
 
 app = FastAPI(title="Nava Vision AI Model Validation", version="1.1.0")
 
@@ -80,18 +83,31 @@ def _session_response(extra: dict | None = None, sess: UserSession | None = None
 def _resolve_session_id(
     x_session_id: Optional[str],
     session_id: Optional[str],
+    cookie_id: Optional[str] = None,
 ) -> Optional[str]:
-    # Header preferred; query param used for <img src> stream/frame
-    return x_session_id or session_id
+    # Header > query (img stream) > cookie (survives refresh without JS)
+    return x_session_id or session_id or cookie_id
+
+
+def _set_session_cookie(response: Response, session_id: str) -> None:
+    response.set_cookie(
+        key=SESSION_COOKIE,
+        value=session_id,
+        max_age=SESSION_COOKIE_MAX_AGE,
+        httponly=False,
+        samesite="lax",
+        path="/",
+    )
 
 
 def get_session(
     x_session_id: Optional[str] = Header(default=None, alias="X-Session-Id"),
     session_id: Optional[str] = Query(default=None),
+    nava_mv_session: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE),
 ) -> UserSession:
     try:
         return session_manager.get_or_create(
-            _resolve_session_id(x_session_id, session_id)
+            _resolve_session_id(x_session_id, session_id, nava_mv_session)
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -100,9 +116,12 @@ def get_session(
 def require_session(
     x_session_id: Optional[str] = Header(default=None, alias="X-Session-Id"),
     session_id: Optional[str] = Query(default=None),
+    nava_mv_session: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE),
 ) -> UserSession:
     try:
-        return session_manager.get(_resolve_session_id(x_session_id, session_id))
+        return session_manager.get(
+            _resolve_session_id(x_session_id, session_id, nava_mv_session)
+        )
     except RuntimeError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
@@ -118,12 +137,19 @@ async def index():
 
 
 @app.post("/api/session")
-async def create_session(sess: UserSession = Depends(get_session)):
-    """Create or resume a user session."""
+async def create_session(
+    response: Response,
+    sess: UserSession = Depends(get_session),
+):
+    """Create or resume a user session; sets cookie so refresh keeps the same seat."""
+    _set_session_cookie(response, sess.session_id)
+    # Fresh seats are <2s old; older means this browser resumed an existing seat
+    resumed = (time.time() - sess.created_at) > 2.0
     return _session_response(
         {
             "ok": True,
             "session_id": sess.session_id,
+            "resumed": resumed,
             **session_manager.info(),
         },
         sess,
@@ -132,11 +158,15 @@ async def create_session(sess: UserSession = Depends(get_session)):
 
 @app.delete("/api/session")
 async def delete_session(
+    response: Response,
     x_session_id: Optional[str] = Header(default=None, alias="X-Session-Id"),
+    nava_mv_session: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE),
 ):
-    if not x_session_id:
+    sid = x_session_id or nava_mv_session
+    if not sid:
         raise HTTPException(status_code=400, detail="X-Session-Id required")
-    session_manager.release(x_session_id)
+    session_manager.release(sid)
+    response.delete_cookie(SESSION_COOKIE, path="/")
     return {"ok": True, **session_manager.info()}
 
 
