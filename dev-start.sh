@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # Start Nava Vision AI Model Validation for developers (Docker + conda image).
 # Exposes the app on all interfaces so teammates on the same Wi‑Fi can connect.
+#
+# Works with:
+#   - docker compose  (plugin v2)  OR
+#   - docker-compose  (standalone) OR
+#   - plain docker build/run       (fallback if compose is not installed)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -8,7 +13,14 @@ cd "$ROOT"
 
 PORT="${PORT:-7860}"
 HOST="${HOST:-0.0.0.0}"
-export PORT HOST
+IMAGE="${IMAGE:-nava-vision-model-validation:latest}"
+CONTAINER="${CONTAINER:-nava-model-validation}"
+MAX_SESSIONS="${MAX_SESSIONS:-3}"
+SESSION_TTL_SEC="${SESSION_TTL_SEC:-3600}"
+export PORT HOST MAX_SESSIONS SESSION_TTL_SEC
+
+# COMPOSE_MODE: plugin | standalone | docker
+COMPOSE_MODE=""
 
 usage() {
   cat <<EOF
@@ -20,24 +32,11 @@ Usage: ./dev-start.sh [up|down|logs|rebuild|local|url]
   rebuild  Force rebuild image, then start
   local    Run without Docker using local conda env 'model-validation'
   url      Print localhost + Wi‑Fi URLs to share with developers
-EOF
-}
 
-lan_ips() {
-  # Prefer hostname -I (Linux); skip docker/tailscale-ish if many exist
-  if command -v hostname >/dev/null 2>&1; then
-    hostname -I 2>/dev/null | tr ' ' '\n' | awk '
-      $1 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ &&
-      $1 !~ /^127\./ &&
-      $1 !~ /^172\.(1[6-9]|2[0-9]|3[0-1])\./ &&
-      $1 !~ /^100\./ { print; found=1 }
-      END { if (!found) exit 1 }
-    ' && return 0
-  fi
-  # Fallback: any non-loopback IPv4
-  hostname -I 2>/dev/null | tr ' ' '\n' | awk '
-    $1 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ && $1 !~ /^127\./ { print }
-  '
+If 'docker compose' is missing, install it with:
+  sudo apt-get update && sudo apt-get install -y docker-compose-plugin
+Or the script will fall back to plain 'docker build/run'.
+EOF
 }
 
 print_urls() {
@@ -48,7 +47,6 @@ print_urls() {
   echo "  Local:    http://127.0.0.1:${PORT}"
   local ip
   local found=0
-  # Prefer real NIC IPs (wlan/eth); skip docker/bridge/tailscale if possible
   if command -v ip >/dev/null 2>&1; then
     while read -r ip; do
       [[ -z "$ip" ]] && continue
@@ -66,7 +64,6 @@ print_urls() {
   if [[ "$found" -eq 0 ]]; then
     while read -r ip; do
       [[ -z "$ip" || "$ip" == 127.* ]] && continue
-      # skip common docker bridges
       [[ "$ip" == 172.17.* || "$ip" == 172.18.* ]] && continue
       echo "  Network:  http://${ip}:${PORT}   ← share this"
       found=1
@@ -80,7 +77,6 @@ print_urls() {
 }
 
 ensure_firewall() {
-  # Best-effort: open port on ufw if active (needs sudo; ignore failures)
   if command -v ufw >/dev/null 2>&1; then
     if sudo -n ufw status 2>/dev/null | grep -qi "Status: active"; then
       if ! sudo -n ufw status 2>/dev/null | grep -q "${PORT}/tcp"; then
@@ -91,18 +87,87 @@ ensure_firewall() {
   fi
 }
 
+detect_compose() {
+  if docker compose version >/dev/null 2>&1; then
+    COMPOSE_MODE="plugin"
+    COMPOSE=(docker compose)
+    return 0
+  fi
+  if command -v docker-compose >/dev/null 2>&1; then
+    COMPOSE_MODE="standalone"
+    COMPOSE=(docker-compose)
+    return 0
+  fi
+  COMPOSE_MODE="docker"
+  COMPOSE=()
+  return 0
+}
+
 need_docker() {
   if ! command -v docker >/dev/null 2>&1; then
     echo "Docker is required. Install Docker, then retry." >&2
     exit 1
   fi
-  if docker compose version >/dev/null 2>&1; then
-    COMPOSE=(docker compose)
-  elif command -v docker-compose >/dev/null 2>&1; then
-    COMPOSE=(docker-compose)
+  detect_compose
+  if [[ "$COMPOSE_MODE" == "docker" ]]; then
+    echo "Note: 'docker compose' plugin not found — using plain docker build/run."
+    echo "Optional (recommended): sudo apt-get install -y docker-compose-plugin"
+    echo ""
+  fi
+}
+
+gpu_args() {
+  # Enable GPU if nvidia runtime / devices exist
+  if docker info 2>/dev/null | grep -qi nvidia; then
+    echo "--gpus all"
+    return
+  fi
+  if [[ -e /dev/nvidia0 ]]; then
+    echo "--gpus all"
+    return
+  fi
+  echo ""
+}
+
+docker_run_up() {
+  local rebuild="${1:-0}"
+  mkdir -p uploads outputs/recordings sample_data
+
+  if [[ "$rebuild" == "1" ]]; then
+    docker build --no-cache -t "$IMAGE" .
   else
-    echo "docker compose is required." >&2
-    exit 1
+    docker build -t "$IMAGE" .
+  fi
+
+  # Replace existing container if present
+  if docker ps -a --format '{{.Names}}' | grep -qx "$CONTAINER"; then
+    docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+  fi
+
+  # shellcheck disable=SC2046
+  docker run -d \
+    --name "$CONTAINER" \
+    --restart unless-stopped \
+    -p "${HOST}:${PORT}:7860" \
+    -e PORT=7860 \
+    -e NVIDIA_VISIBLE_DEVICES=all \
+    -e NVIDIA_DRIVER_CAPABILITIES=compute,utility \
+    -e "MAX_SESSIONS=${MAX_SESSIONS}" \
+    -e "SESSION_TTL_SEC=${SESSION_TTL_SEC}" \
+    -v "${ROOT}/uploads:/app/uploads" \
+    -v "${ROOT}/outputs:/app/outputs" \
+    -v "${ROOT}/sample_data:/app/sample_data:ro" \
+    $(gpu_args) \
+    "$IMAGE"
+}
+
+compose_up() {
+  local rebuild="${1:-0}"
+  if [[ "$rebuild" == "1" ]]; then
+    "${COMPOSE[@]}" build --no-cache
+    "${COMPOSE[@]}" up -d
+  else
+    "${COMPOSE[@]}" up -d --build
   fi
 }
 
@@ -111,8 +176,12 @@ cmd_up() {
   mkdir -p uploads outputs/recordings
   ensure_firewall
   echo "Starting Model Validation on ${HOST}:${PORT} (all network interfaces)…"
-  echo "(GPU passthrough enabled via docker compose 'gpus: all')"
-  "${COMPOSE[@]}" up -d --build
+  if [[ "$COMPOSE_MODE" == "docker" ]]; then
+    docker_run_up 0
+  else
+    echo "(using ${COMPOSE_MODE} compose)"
+    compose_up 0
+  fi
   print_urls
   echo "Check GPU: curl -s http://127.0.0.1:${PORT}/api/system"
   echo "Logs:      ./dev-start.sh logs"
@@ -121,21 +190,32 @@ cmd_up() {
 
 cmd_down() {
   need_docker
-  "${COMPOSE[@]}" down
+  if [[ "$COMPOSE_MODE" == "docker" ]]; then
+    docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+  else
+    "${COMPOSE[@]}" down
+  fi
   echo "Stopped."
 }
 
 cmd_logs() {
   need_docker
-  "${COMPOSE[@]}" logs -f model-validation
+  if [[ "$COMPOSE_MODE" == "docker" ]]; then
+    docker logs -f "$CONTAINER"
+  else
+    "${COMPOSE[@]}" logs -f model-validation
+  fi
 }
 
 cmd_rebuild() {
   need_docker
   mkdir -p uploads outputs/recordings
   ensure_firewall
-  "${COMPOSE[@]}" build --no-cache
-  "${COMPOSE[@]}" up -d
+  if [[ "$COMPOSE_MODE" == "docker" ]]; then
+    docker_run_up 1
+  else
+    compose_up 1
+  fi
   print_urls
 }
 

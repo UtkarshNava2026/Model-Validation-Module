@@ -25,6 +25,15 @@ curl -s http://localhost:7860/api/system   # should show cuda_available: true
 ./dev-start.sh down
 ```
 
+If you see `docker: unknown command: docker compose`, either install the plugin:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y docker-compose-plugin
+```
+
+…or pull the latest `dev-start.sh` — it falls back to plain `docker build` / `docker run` automatically.
+
 The app listens on **`0.0.0.0:7860`** (all interfaces). Devs on the **same Wi‑Fi** open:
 
 ```text
