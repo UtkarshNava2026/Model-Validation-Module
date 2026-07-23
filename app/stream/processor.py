@@ -51,6 +51,16 @@ class StreamProcessor:
         self._image_paths: list[str] = []
         self._image_index = 0
         self._current_image_name: Optional[str] = None
+        # Inference video recording
+        self._recording = False
+        self._recorder: Optional[cv2.VideoWriter] = None
+        self._record_path: Optional[Path] = None
+        self._record_ready_path: Optional[Path] = None
+        self._record_start_ts = 0.0
+        self._record_limit_sec: Optional[float] = None
+        self._record_frames = 0
+        self._record_dir = Path(__file__).resolve().parents[2] / "outputs" / "recordings"
+        self._record_dir.mkdir(parents=True, exist_ok=True)
 
     # ---- state helpers ----
     def status(self) -> dict:
@@ -59,6 +69,9 @@ class StreamProcessor:
                 self._frame_idx / self._source_fps if self._source_fps > 0 else 0.0
             )
             image_count = len(self._image_paths)
+            recorded_sec = 0.0
+            if self._recording and self._record_start_ts > 0:
+                recorded_sec = max(0.0, time.time() - self._record_start_ts)
             return {
                 "status": self._status,
                 "playing": self._playing,
@@ -85,6 +98,15 @@ class StreamProcessor:
                 "error": self._error,
                 "conf": getattr(self._predictor, "conf", None),
                 "nms": getattr(self._predictor, "nms", None),
+                "recording": self._recording,
+                "record_limit_sec": self._record_limit_sec,
+                "record_elapsed_sec": round(recorded_sec, 1),
+                "record_frames": self._record_frames,
+                "download_ready": self._record_ready_path is not None
+                and self._record_ready_path.exists(),
+                "download_name": (
+                    self._record_ready_path.name if self._record_ready_path else None
+                ),
             }
 
     def set_predictor(self, predictor):
@@ -111,6 +133,104 @@ class StreamProcessor:
         """Playback speed multiplier (0.25x – 8x)."""
         with self._lock:
             self._speed = float(np.clip(speed, 0.25, 8.0))
+
+    def start_recording(self, duration_sec: float | None = None):
+        """
+        Start capturing annotated frames to an MP4.
+        duration_sec: if > 0, auto-stop after that many seconds; else until stop_recording().
+        """
+        with self._lock:
+            if self._predictor is None:
+                raise RuntimeError("Load model first")
+            if self._source_type in (None, SourceType.IMAGE, SourceType.IMAGE_DIR):
+                raise RuntimeError("Recording is for video / RTSP playback")
+            if self._recording:
+                return
+            # Close any previous open writer
+            self._close_recorder(finalize=False)
+            stamp = time.strftime("%Y%m%d_%H%M%S")
+            self._record_path = self._record_dir / f"inference_{stamp}.mp4"
+            self._record_ready_path = None
+            self._record_frames = 0
+            self._record_start_ts = time.time()
+            limit = float(duration_sec) if duration_sec is not None else 0.0
+            self._record_limit_sec = limit if limit > 0 else None
+            self._recording = True
+            # Writer opens lazily on first annotated frame (needs size)
+            logger.info(
+                "Recording started → %s (limit=%s s)",
+                self._record_path.name,
+                self._record_limit_sec,
+            )
+
+    def stop_recording(self) -> Optional[Path]:
+        """Stop recording and finalize file for download."""
+        with self._lock:
+            if not self._recording and self._recorder is None:
+                return self._record_ready_path
+            self._recording = False
+            path = self._close_recorder(finalize=True)
+            return path
+
+    def get_download_path(self) -> Optional[Path]:
+        with self._lock:
+            if self._record_ready_path and self._record_ready_path.exists():
+                return self._record_ready_path
+            return None
+
+    def _close_recorder(self, finalize: bool) -> Optional[Path]:
+        path = self._record_path
+        if self._recorder is not None:
+            try:
+                self._recorder.release()
+            except Exception:
+                pass
+            self._recorder = None
+        self._recording = False
+        if finalize and path is not None and path.exists() and path.stat().st_size > 0:
+            self._record_ready_path = path
+            logger.info(
+                "Recording saved: %s (%d frames)", path.name, self._record_frames
+            )
+            return path
+        self._record_path = None
+        return self._record_ready_path
+
+    def _ensure_recorder(self, frame: np.ndarray):
+        if not self._recording or self._recorder is not None:
+            return
+        assert self._record_path is not None
+        h, w = frame.shape[:2]
+        fps = self._source_fps if self._source_fps and self._source_fps > 1 else 20.0
+        # Cap writer fps to a sane range
+        fps = float(np.clip(fps, 5.0, 60.0))
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        writer = cv2.VideoWriter(str(self._record_path), fourcc, fps, (w, h))
+        if not writer.isOpened():
+            self._recording = False
+            self._error = "Could not open video writer for recording"
+            raise RuntimeError(self._error)
+        self._recorder = writer
+
+    def _write_record_frame(self, frame: np.ndarray):
+        if not self._recording:
+            return
+        try:
+            self._ensure_recorder(frame)
+            if self._recorder is not None:
+                self._recorder.write(frame)
+                self._record_frames += 1
+        except Exception as exc:
+            logger.exception("Record write failed")
+            self._error = str(exc)
+            self._recording = False
+            self._close_recorder(finalize=False)
+            return
+        # Auto-stop after duration (record this frame, then finalize)
+        if self._record_limit_sec is not None and self._record_start_ts > 0:
+            if (time.time() - self._record_start_ts) >= self._record_limit_sec:
+                self._recording = False
+                self._close_recorder(finalize=True)
 
     def _reprocess_current(self):
         """Re-run inference on the last raw frame (image / paused video)."""
@@ -306,6 +426,9 @@ class StreamProcessor:
     def stop(self):
         self.pause()
         with self._lock:
+            if self._recording or self._recorder is not None:
+                self._recording = False
+                self._close_recorder(finalize=True)
             if self._cap is not None:
                 try:
                     self._cap.release()
@@ -347,6 +470,7 @@ class StreamProcessor:
         if ok:
             self._latest_jpeg = buf.tobytes()
             self._latest_frame = frame
+        self._write_record_frame(frame)
 
     def _process_frame(self, frame: np.ndarray, set_index: int | None = None):
         assert self._predictor is not None

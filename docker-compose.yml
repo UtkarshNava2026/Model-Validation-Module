@@ -1,0 +1,24 @@
+services:
+  model-validation:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: nava-vision-model-validation:latest
+    container_name: nava-model-validation
+    ports:
+      - "${PORT:-7860}:7860"
+    volumes:
+      - ./uploads:/app/uploads
+      - ./outputs:/app/outputs
+      - ./sample_data:/app/sample_data:ro
+    environment:
+      - PORT=7860
+    restart: unless-stopped
+    # Uncomment for GPU (requires nvidia-container-toolkit)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]

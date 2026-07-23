@@ -71,6 +71,11 @@ class GotoImageBody(BaseModel):
     index: int = Field(..., ge=0)
 
 
+class RecordBody(BaseModel):
+    """duration_sec > 0 records for that many seconds; 0 / null = until turned off."""
+    duration_sec: Optional[float] = Field(None, ge=0, le=3600)
+
+
 async def _save_upload(file: UploadFile, prefix: str) -> Path:
     suffix = Path(file.filename or "file").suffix
     dest = UPLOAD_DIR / f"{prefix}_{uuid.uuid4().hex}{suffix}"
@@ -297,6 +302,38 @@ async def seek(body: SeekBody):
         return {"ok": True, **processor.status()}
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/record/start")
+async def record_start(body: RecordBody):
+    try:
+        processor.start_recording(duration_sec=body.duration_sec)
+        return {"ok": True, **processor.status()}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/record/stop")
+async def record_stop():
+    try:
+        path = processor.stop_recording()
+        status = processor.status()
+        return {"ok": True, "saved": str(path) if path else None, **status}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/record/download")
+async def record_download():
+    path = processor.get_download_path()
+    if path is None or not path.exists():
+        raise HTTPException(status_code=404, detail="No recorded video ready")
+    return FileResponse(
+        path,
+        media_type="video/mp4",
+        filename=path.name,
+        headers={"Content-Disposition": f'attachment; filename="{path.name}"'},
+    )
 
 
 @app.get("/api/status")

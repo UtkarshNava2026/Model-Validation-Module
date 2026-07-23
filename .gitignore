@@ -14,3 +14,6 @@ uploads/
 .idea/
 .vscode/
 third_party/YOLOX/
+outputs/
+*.mp4
+!sample_data/**

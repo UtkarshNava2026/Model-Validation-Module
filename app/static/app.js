@@ -22,6 +22,10 @@
     btnNextImage: $("btnNextImage"),
     galleryNav: $("galleryNav"),
     galleryInfo: $("galleryInfo"),
+    recordToggle: $("recordToggle"),
+    recordDuration: $("recordDuration"),
+    recordStatus: $("recordStatus"),
+    btnDownload: $("btnDownload"),
     sourceMsg: $("sourceMsg"),
     confSlider: $("confSlider"),
     nmsSlider: $("nmsSlider"),
@@ -304,6 +308,43 @@
     els.btnNextImage.disabled = !s.has_next;
   }
 
+  function updateRecordUI(s) {
+    const recording = !!s.recording;
+    const ready = !!s.download_ready;
+    // Keep checkbox in sync unless user is mid-click (handled by change handler)
+    if (els.recordToggle.checked !== recording && !els.recordToggle.dataset.busy) {
+      els.recordToggle.checked = recording;
+    }
+
+    els.recordStatus.classList.remove("live", "ready");
+    if (recording) {
+      const elapsed = s.record_elapsed_sec ?? 0;
+      const limit = s.record_limit_sec;
+      els.recordStatus.textContent = limit
+        ? `recording ${elapsed}s / ${limit}s`
+        : `recording ${elapsed}s`;
+      els.recordStatus.classList.add("live");
+    } else if (ready) {
+      els.recordStatus.textContent = `ready · ${s.download_name || "video"}`;
+      els.recordStatus.classList.add("ready");
+    } else {
+      els.recordStatus.textContent = "off";
+    }
+
+    if (ready) {
+      els.btnDownload.hidden = false;
+      els.btnDownload.href = `/api/record/download?ts=${Date.now()}`;
+      els.btnDownload.setAttribute("download", s.download_name || "inference.mp4");
+    } else {
+      els.btnDownload.hidden = true;
+    }
+
+    const canRecord =
+      s.source_type === "video" || s.source_type === "rtsp";
+    els.recordToggle.disabled = !canRecord && !recording;
+    els.recordDuration.disabled = recording;
+  }
+
   function updateTimeline(s) {
     const seekable = !!s.seekable;
     lastSeekable = seekable;
@@ -361,6 +402,7 @@
 
     updateTimeline(s);
     updateGallery(s);
+    updateRecordUI(s);
     if (s.error) setHint(els.sourceMsg, s.error, "error");
   }
 
@@ -449,6 +491,42 @@
   els.btnOpenRtsp.addEventListener("click", openRtsp);
   els.btnPrevImage.addEventListener("click", () => stepImage("prev"));
   els.btnNextImage.addEventListener("click", () => stepImage("next"));
+
+  els.recordToggle.addEventListener("change", async () => {
+    els.recordToggle.dataset.busy = "1";
+    try {
+      if (els.recordToggle.checked) {
+        const dur = Number(els.recordDuration.value);
+        const body = {
+          duration_sec: Number.isFinite(dur) && dur > 0 ? dur : 0,
+        };
+        const s = await api("/api/record/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        updateStatusUI(s);
+        setHint(
+          els.sourceMsg,
+          body.duration_sec
+            ? `Recording inference for ${body.duration_sec}s…`
+            : "Recording until you turn it off…",
+          "ok"
+        );
+      } else {
+        const s = await api("/api/record/stop", { method: "POST" });
+        updateStatusUI(s);
+        if (s.download_ready) {
+          setHint(els.sourceMsg, "Recording saved — click Download.", "ok");
+        }
+      }
+    } catch (err) {
+      els.recordToggle.checked = false;
+      setHint(els.sourceMsg, err.message, "error");
+    } finally {
+      delete els.recordToggle.dataset.busy;
+    }
+  });
 
   document.addEventListener("keydown", (ev) => {
     if (!els.galleryNav || els.galleryNav.hidden) return;

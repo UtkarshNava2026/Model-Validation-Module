@@ -147,6 +147,18 @@
           <span class="gallery-info" id="galleryInfo">image —</span>
           <button class="btn icon" id="btnNextImage" type="button" title="Next image (→)">Next →</button>
         </div>
+        <div class="record-bar">
+          <label class="toggle">
+            <input type="checkbox" id="recordToggle" />
+            <span>Download inference video</span>
+          </label>
+          <label class="duration-field">
+            <span>For (sec)</span>
+            <input type="number" id="recordDuration" min="0" max="3600" step="1" value="30" title="0 = until you turn off" />
+          </label>
+          <span class="record-status" id="recordStatus">off</span>
+          <a class="btn icon" id="btnDownload" href="/api/record/download" hidden>⬇ Download</a>
+        </div>
         <div class="controls">
           <button class="btn icon" id="btnPlay" type="button" title="Play">▶ Play</button>
           <button class="btn icon" id="btnPause" type="button" title="Pause">❚❚ Pause</button>

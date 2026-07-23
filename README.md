@@ -13,17 +13,36 @@ Uses **official YOLOX** preprocessing (`preproc` / `ValTransform`) and postproce
 - Confidence and NMS threshold sliders (live update)
 - Official YOLOX letterbox (pad=114) + decode + NMS
 
-## Quick start
+## Quick start (Docker — recommended for server / team)
 
 ```bash
-cd Model-Validation
+./dev-start.sh          # build + start (conda env inside Docker)
+# open http://localhost:7860
+./dev-start.sh logs
+./dev-start.sh down
+```
+
+Local conda (no Docker):
+
+```bash
+./dev-start.sh local
+```
+
+Manual venv:
+
+```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+bash scripts/setup_yolox.sh
 python run.py
 ```
 
 Open **http://localhost:7860**
+
+### Download inference video
+
+On video / RTSP: turn on **Download inference video**, set duration in seconds (or `0` = until you turn it off), play the stream, then click **Download** when recording finishes.
 
 ## Uploads
 

@@ -395,6 +395,70 @@ input[type="range"] {
   min-width: 3.2em;
 }
 
+.record-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.record-bar .toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.86rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.record-bar .toggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent-2);
+}
+
+.duration-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.duration-field input {
+  width: 72px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+}
+
+.record-status {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.record-status.live {
+  color: var(--accent-2);
+  font-weight: 600;
+}
+
+.record-status.ready {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+#btnDownload {
+  text-decoration: none;
+  margin-left: auto;
+}
+
 .gallery-nav {
   display: flex;
   align-items: center;
