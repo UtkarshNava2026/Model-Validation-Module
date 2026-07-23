@@ -19,11 +19,19 @@ Requires [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-nat
 
 ```bash
 ./dev-start.sh          # build + start (conda env inside Docker, GPU enabled)
-# open http://localhost:7860
+./dev-start.sh url      # print Wi‑Fi share URLs
 curl -s http://localhost:7860/api/system   # should show cuda_available: true
 ./dev-start.sh logs
 ./dev-start.sh down
 ```
+
+The app listens on **`0.0.0.0:7860`** (all interfaces). Devs on the **same Wi‑Fi** open:
+
+```text
+http://<YOUR_LAPTOP_LAN_IP>:7860
+```
+
+Example: `http://192.168.1.50:7860` — run `./dev-start.sh url` to print the exact link.
 
 **Performance tip:** In the UI, keep Device = **Auto/CUDA**. CPU-only Docker runs ~2 FPS; GPU should be much faster. Reload the model after switching device.
 

@@ -5,8 +5,9 @@ services:
       dockerfile: Dockerfile
     image: nava-vision-model-validation:latest
     container_name: nava-model-validation
+    # Bind on all interfaces so same-WiFi devices can reach this laptop
     ports:
-      - "${PORT:-7860}:7860"
+      - "0.0.0.0:${PORT:-7860}:7860"
     volumes:
       - ./uploads:/app/uploads
       - ./outputs:/app/outputs
