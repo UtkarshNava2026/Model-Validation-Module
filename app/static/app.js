@@ -8,6 +8,7 @@
     device: $("device"),
     btnLoad: $("btnLoad"),
     loadMsg: $("loadMsg"),
+    gpuHint: $("gpuHint"),
     imageFile: $("imageFile"),
     folderFiles: $("folderFiles"),
     dirPath: $("dirPath"),
@@ -126,7 +127,7 @@
       renderClasses(data.class_names || []);
       setHint(
         els.loadMsg,
-        `Loaded (${data.backend}) · ${data.num_classes} classes · input ${data.test_size}`,
+        `Loaded (${data.backend}) on ${data.device}${data.fp16 ? " FP16" : ""} · ${data.num_classes} classes · input ${data.test_size}`,
         "ok"
       );
       pollStatus();
@@ -630,6 +631,27 @@
     return (m || 0) * 60 + (s || 0);
   }
 
+  async function checkGpu() {
+    if (!els.gpuHint) return;
+    try {
+      const s = await api("/api/system");
+      if (s.cuda_available) {
+        els.gpuHint.textContent = `GPU ready: ${s.gpu_name}`;
+        els.gpuHint.classList.add("ok");
+        if (els.device.value === "auto" || els.device.value === "cpu") {
+          els.device.value = "auto";
+        }
+      } else {
+        els.gpuHint.textContent =
+          "No GPU in this runtime — inference will use CPU (slow). Enable Docker GPU / select CUDA.";
+        els.gpuHint.classList.add("error");
+      }
+    } catch (_) {
+      els.gpuHint.textContent = "Could not detect GPU status.";
+    }
+  }
+
   pollTimer = setInterval(pollStatus, 500);
   pollStatus();
+  checkGpu();
 })();

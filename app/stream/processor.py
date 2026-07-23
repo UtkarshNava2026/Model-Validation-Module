@@ -115,6 +115,10 @@ class StreamProcessor:
             self._status = "model_ready"
             self._error = None
 
+    @property
+    def predictor(self):
+        return self._predictor
+
     def set_conf(self, conf: float):
         with self._lock:
             if self._predictor is None:
@@ -529,12 +533,17 @@ class StreamProcessor:
 
             # Pace video by source FPS / speed; RTSP runs as fast as inference allows
             if source_type == SourceType.VIDEO:
+                # At >1x, skip extra source frames so playback feels faster
+                if speed > 1.0:
+                    skip = max(0, int(speed) - 1)
+                    for _ in range(skip):
+                        if self._stop_event.is_set():
+                            break
+                        cap.grab()
                 target = source_fps * max(speed, 0.25)
                 delay = (1.0 / target) if target > 0 else 0.04
-                # Subtract a bit of inference time already spent
                 delay = max(0.0, delay - 0.001)
-                # At high speed, skip wait entirely when inference is the bottleneck
-                if speed >= 4.0:
+                if speed >= 2.0:
                     delay = 0.0
                 if delay > 0:
                     time.sleep(delay)

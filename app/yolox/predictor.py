@@ -42,6 +42,7 @@ class YOLOXPredictor:
         self.num_classes = self.exp.num_classes
         self.preproc = ValTransform(legacy=self.exp.legacy)
         self.backend = "onnx" if self.weight_path.suffix.lower() == ".onnx" else "torch"
+        self.fp16 = self.device == "cuda"
         self.session = None
         self.model = None
         self.input_name = None
@@ -63,8 +64,13 @@ class YOLOXPredictor:
 
     @staticmethod
     def _resolve_device(device: str) -> str:
-        if device == "gpu" or device == "cuda":
-            return "cuda" if torch.cuda.is_available() else "cpu"
+        want = (device or "auto").lower().strip()
+        if want in ("auto", "gpu", "cuda"):
+            if torch.cuda.is_available():
+                return "cuda"
+            if want != "auto":
+                logger.warning("CUDA requested but not available — falling back to CPU")
+            return "cpu"
         return "cpu"
 
     def set_conf(self, conf: float):
@@ -138,17 +144,28 @@ class YOLOXPredictor:
         model.eval()
         if self.device == "cuda":
             model.cuda()
+            # Official YOLOX speed tip: fuse conv+bn, then optional FP16
+            try:
+                from yolox.utils import fuse_model
+
+                model = fuse_model(model)
+                logger.info("Applied YOLOX fuse_model (conv+bn)")
+            except Exception as exc:
+                logger.warning("fuse_model skipped: %s", exc)
+            if self.fp16:
+                model = model.half()
         self.model = model
         if hasattr(exp_obj, "test_size"):
             ts = exp_obj.test_size
             self.test_size = (int(ts[0]), int(ts[1]))
         self.exp.raw_exp = exp_obj
         logger.info(
-            "Loaded PyTorch .pth: %s size=%s classes=%s device=%s",
+            "Loaded PyTorch .pth: %s size=%s classes=%s device=%s fp16=%s",
             self.weight_path.name,
             self.test_size,
             self.num_classes,
             self.device,
+            self.fp16 and self.device == "cuda",
         )
 
     def inference(self, img: np.ndarray) -> tuple[Any, dict]:
@@ -200,11 +217,20 @@ class YOLOXPredictor:
                 "Expected (1, N, 5+num_classes)."
             )
 
-        tensor = torch.from_numpy(processed).unsqueeze(0).float()
+        tensor = torch.from_numpy(processed).unsqueeze(0)
         if self.device == "cuda":
-            tensor = tensor.cuda()
-        with torch.no_grad():
+            tensor = tensor.cuda(non_blocking=True)
+            if self.fp16:
+                tensor = tensor.half()
+            else:
+                tensor = tensor.float()
+        else:
+            tensor = tensor.float()
+        with torch.inference_mode():
             outputs = self.model(tensor)
+            # NMS ops prefer float32
+            if outputs.dtype != torch.float32:
+                outputs = outputs.float()
             outputs = postprocess(
                 outputs,
                 self.num_classes,

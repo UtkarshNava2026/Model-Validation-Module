@@ -15,12 +15,17 @@ Uses **official YOLOX** preprocessing (`preproc` / `ValTransform`) and postproce
 
 ## Quick start (Docker — recommended for server / team)
 
+Requires [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) for GPU speed.
+
 ```bash
-./dev-start.sh          # build + start (conda env inside Docker)
+./dev-start.sh          # build + start (conda env inside Docker, GPU enabled)
 # open http://localhost:7860
+curl -s http://localhost:7860/api/system   # should show cuda_available: true
 ./dev-start.sh logs
 ./dev-start.sh down
 ```
+
+**Performance tip:** In the UI, keep Device = **Auto/CUDA**. CPU-only Docker runs ~2 FPS; GPU should be much faster. Reload the model after switching device.
 
 Local conda (no Docker):
 

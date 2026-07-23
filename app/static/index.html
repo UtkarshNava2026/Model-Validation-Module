@@ -45,10 +45,12 @@
           <label class="field row">
             <span>Device</span>
             <select id="device">
-              <option value="cpu">CPU</option>
+              <option value="auto" selected>Auto (GPU if available)</option>
               <option value="cuda">CUDA</option>
+              <option value="cpu">CPU</option>
             </select>
           </label>
+          <p class="hint" id="gpuHint">Checking GPU…</p>
           <button class="btn primary" id="btnLoad" type="button">Load model</button>
           <p class="hint" id="loadMsg">Upload YOLOX .pth / .onnx weights, class list, and experiment file.</p>
         </section>

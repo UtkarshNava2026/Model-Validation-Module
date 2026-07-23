@@ -111,7 +111,7 @@ async def upload_model(
     weight: UploadFile = File(..., description="YOLOX .pth or .onnx weights"),
     classes: UploadFile = File(..., description="Class names .txt"),
     exp: UploadFile = File(..., description="YOLOX experiment .py"),
-    device: str = Form("cpu"),
+    device: str = Form("auto"),
     conf: Optional[float] = Form(None),
     nms: Optional[float] = Form(None),
 ):
@@ -143,6 +143,7 @@ async def upload_model(
             "conf": predictor.conf,
             "nms": predictor.nms,
             "device": predictor.device,
+            "fp16": bool(getattr(predictor, "fp16", False) and predictor.device == "cuda"),
         }
     except Exception as exc:
         logger.exception("Upload/load failed")
@@ -336,9 +337,27 @@ async def record_download():
     )
 
 
+@app.get("/api/system")
+async def system_info():
+    """Host/runtime GPU info so UI can default to CUDA when available."""
+    import torch
+
+    cuda = bool(torch.cuda.is_available())
+    name = torch.cuda.get_device_name(0) if cuda else None
+    return {
+        "cuda_available": cuda,
+        "gpu_name": name,
+        "torch": torch.__version__,
+        "recommended_device": "cuda" if cuda else "cpu",
+    }
+
+
 @app.get("/api/status")
 async def status():
-    return processor.status()
+    st = processor.status()
+    pred = processor.predictor
+    st["device"] = getattr(pred, "device", None) if pred else None
+    return st
 
 
 @app.get("/api/frame.jpg")

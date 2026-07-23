@@ -39,9 +39,11 @@ cmd_up() {
   need_docker
   mkdir -p uploads outputs/recordings
   echo "Starting Model Validation on http://0.0.0.0:${PORT} …"
+  echo "(GPU passthrough enabled via docker compose 'gpus: all')"
   "${COMPOSE[@]}" up -d --build
   echo ""
   echo "Ready:  http://localhost:${PORT}"
+  echo "Check GPU: curl -s http://localhost:${PORT}/api/system"
   echo "Logs:   ./dev-start.sh logs"
   echo "Stop:   ./dev-start.sh down"
 }

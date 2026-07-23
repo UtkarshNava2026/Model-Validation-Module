@@ -13,12 +13,7 @@ services:
       - ./sample_data:/app/sample_data:ro
     environment:
       - PORT=7860
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    gpus: all
     restart: unless-stopped
-    # Uncomment for GPU (requires nvidia-container-toolkit)
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: 1
-    #           capabilities: [gpu]
