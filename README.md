@@ -27,6 +27,22 @@ curl -s http://localhost:7860/api/system   # should show cuda_available: true
 
 **Performance tip:** In the UI, keep Device = **Auto/CUDA**. CPU-only Docker runs ~2 FPS; GPU should be much faster. Reload the model after switching device.
 
+### Multi-user (3+ developers)
+
+Each browser gets a **private session** (own model, video, controls). Defaults:
+
+| GPU VRAM | Suggested `MAX_SESSIONS` |
+|----------|--------------------------|
+| 8 GB     | `3` (default)            |
+| 16 GB    | `4`–`6`                  |
+
+```bash
+MAX_SESSIONS=5 ./dev-start.sh
+# or in .env / docker-compose environment
+```
+
+Idle sessions auto-expire after `SESSION_TTL_SEC` (default 1 hour) to free GPU memory.
+
 Local conda (no Docker):
 
 ```bash

@@ -40,6 +40,7 @@
     statusPill: $("statusPill"),
     fpsMeta: $("fpsMeta"),
     detMeta: $("detMeta"),
+    sessionMeta: $("sessionMeta"),
     frameInfo: $("frameInfo"),
     classChips: $("classChips"),
     timeline: $("timeline"),
@@ -48,11 +49,28 @@
     speedSelect: $("speedSelect"),
   };
 
+  const SESSION_KEY = "nava_mv_session_id";
+  let sessionId = localStorage.getItem(SESSION_KEY) || "";
   let pollTimer = null;
   let streamMode = false;
   let modelReady = false;
   let scrubbing = false;
   let lastSeekable = false;
+
+  function rememberSession(id) {
+    if (!id) return;
+    sessionId = id;
+    localStorage.setItem(SESSION_KEY, id);
+    if (els.sessionMeta) {
+      els.sessionMeta.textContent = `session ${id.slice(0, 8)}`;
+    }
+  }
+
+  function withSessionQuery(url) {
+    if (!sessionId) return url;
+    const join = url.includes("?") ? "&" : "?";
+    return `${url}${join}session_id=${encodeURIComponent(sessionId)}`;
+  }
 
   document.querySelectorAll(".tab").forEach((tab) => {
     tab.addEventListener("click", () => {
@@ -78,11 +96,11 @@
 
   function startMjpeg() {
     streamMode = true;
-    showFrame(`/api/stream?ts=${Date.now()}`);
+    showFrame(withSessionQuery(`/api/stream?ts=${Date.now()}`));
   }
 
   function refreshStill() {
-    showFrame(`/api/frame.jpg?ts=${Date.now()}`);
+    showFrame(withSessionQuery(`/api/frame.jpg?ts=${Date.now()}`));
   }
 
   function formatTime(sec) {
@@ -93,11 +111,23 @@
   }
 
   async function api(path, options = {}) {
-    const res = await fetch(path, options);
+    const headers = new Headers(options.headers || {});
+    if (sessionId) headers.set("X-Session-Id", sessionId);
+    const res = await fetch(path, { ...options, headers });
     const data = await res.json().catch(() => ({}));
+    if (data.session_id) rememberSession(data.session_id);
     if (!res.ok) {
       const detail = data.detail || res.statusText || "Request failed";
       throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+    }
+    return data;
+  }
+
+  async function ensureSession() {
+    const data = await api("/api/session", { method: "POST" });
+    rememberSession(data.session_id);
+    if (els.sessionMeta && data.active_sessions != null) {
+      els.sessionMeta.textContent = `session ${sessionId.slice(0, 8)} · ${data.active_sessions}/${data.max_sessions} users`;
     }
     return data;
   }
@@ -334,7 +364,7 @@
 
     if (ready) {
       els.btnDownload.hidden = false;
-      els.btnDownload.href = `/api/record/download?ts=${Date.now()}`;
+      els.btnDownload.href = withSessionQuery(`/api/record/download?ts=${Date.now()}`);
       els.btnDownload.setAttribute("download", s.download_name || "inference.mp4");
     } else {
       els.btnDownload.hidden = true;
@@ -384,6 +414,7 @@
 
   function updateStatusUI(s) {
     if (!s) return;
+    if (s.session_id) rememberSession(s.session_id);
     const status = s.status || "idle";
     els.statusPill.textContent = status;
     els.statusPill.classList.remove("playing", "error");
@@ -391,6 +422,9 @@
     if (status === "error") els.statusPill.classList.add("error");
     els.fpsMeta.textContent = `FPS ${s.fps ?? "—"}`;
     els.detMeta.textContent = `Dets ${s.detections ?? "—"}`;
+    if (els.sessionMeta && s.sessions) {
+      els.sessionMeta.textContent = `session ${(s.session_id || sessionId).slice(0, 8)} · ${s.sessions.active_sessions}/${s.sessions.max_sessions} users`;
+    }
 
     const speedLabel = s.speed != null ? ` · ${s.speed}×` : "";
     if (s.image_gallery) {
@@ -636,7 +670,9 @@
     try {
       const s = await api("/api/system");
       if (s.cuda_available) {
-        els.gpuHint.textContent = `GPU ready: ${s.gpu_name}`;
+        const mem = s.gpu_memory_gb ? ` · ${s.gpu_memory_gb} GB` : "";
+        const slots = ` · sessions ${s.active_sessions}/${s.max_sessions}`;
+        els.gpuHint.textContent = `GPU ready: ${s.gpu_name}${mem}${slots}`;
         els.gpuHint.classList.add("ok");
         if (els.device.value === "auto" || els.device.value === "cpu") {
           els.device.value = "auto";
@@ -651,7 +687,31 @@
     }
   }
 
-  pollTimer = setInterval(pollStatus, 500);
-  pollStatus();
-  checkGpu();
+  // Init private session, then poll
+  ensureSession()
+    .then(() => {
+      checkGpu();
+      pollStatus();
+      pollTimer = setInterval(pollStatus, 500);
+    })
+    .catch((err) => {
+      if (els.gpuHint) {
+        els.gpuHint.textContent = err.message;
+        els.gpuHint.classList.add("error");
+      }
+      setHint(els.loadMsg, err.message, "error");
+    });
+
+  window.addEventListener("beforeunload", () => {
+    if (!sessionId) return;
+    // Best-effort release (may not always fire)
+    try {
+      navigator.sendBeacon?.(
+        "/api/session",
+        new Blob([], { type: "application/json" })
+      );
+    } catch (_) {
+      /* ignore */
+    }
+  });
 })();

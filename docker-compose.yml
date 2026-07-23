@@ -15,5 +15,8 @@ services:
       - PORT=7860
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      # Concurrent users: 3 on ~8GB GPU, raise to 4–6 on 16GB
+      - MAX_SESSIONS=${MAX_SESSIONS:-3}
+      - SESSION_TTL_SEC=${SESSION_TTL_SEC:-3600}
     gpus: all
     restart: unless-stopped

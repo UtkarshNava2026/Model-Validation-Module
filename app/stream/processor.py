@@ -112,8 +112,12 @@ class StreamProcessor:
     def set_predictor(self, predictor):
         with self._lock:
             self._predictor = predictor
-            self._status = "model_ready"
-            self._error = None
+            if predictor is None:
+                self._status = "idle"
+                self._error = None
+            else:
+                self._status = "model_ready"
+                self._error = None
 
     @property
     def predictor(self):
