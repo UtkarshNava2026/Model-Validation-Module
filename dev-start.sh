@@ -24,14 +24,18 @@ COMPOSE_MODE=""
 
 usage() {
   cat <<EOF
-Usage: ./dev-start.sh [up|down|logs|rebuild|local|url]
+Usage: ./dev-start.sh [up|down|restart|logs|rebuild|local|url]
 
-  up       Build (if needed) and start container in background (default)
+  up       Start container in background (builds only if image is missing)
   down     Stop and remove container
+  restart  Restart container to pick up app/ code changes (no rebuild)
   logs     Follow container logs
-  rebuild  Force rebuild image, then start
+  rebuild  Force rebuild image, then start (needs internet)
   local    Run without Docker using local conda env 'model-validation'
   url      Print localhost + Wi‑Fi URLs to share with developers
+
+app/ and run.py are bind-mounted, so code edits need only 'restart'.
+If the Docker registry is unreachable, 'up' reuses the local image.
 
 If 'docker compose' is missing, install it with:
   sudo apt-get update && sudo apt-get install -y docker-compose-plugin
@@ -129,14 +133,20 @@ gpu_args() {
   echo ""
 }
 
+image_exists() {
+  docker image inspect "$IMAGE" >/dev/null 2>&1
+}
+
 docker_run_up() {
   local rebuild="${1:-0}"
   mkdir -p uploads outputs/recordings sample_data
 
   if [[ "$rebuild" == "1" ]]; then
     docker build --no-cache -t "$IMAGE" .
-  else
+  elif ! image_exists; then
     docker build -t "$IMAGE" .
+  else
+    echo "Using existing image ${IMAGE} (app/ is bind-mounted, no rebuild needed)."
   fi
 
   # Replace existing container if present
@@ -154,6 +164,8 @@ docker_run_up() {
     -e NVIDIA_DRIVER_CAPABILITIES=compute,utility \
     -e "MAX_SESSIONS=${MAX_SESSIONS}" \
     -e "SESSION_TTL_SEC=${SESSION_TTL_SEC}" \
+    -v "${ROOT}/app:/app/app" \
+    -v "${ROOT}/run.py:/app/run.py:ro" \
     -v "${ROOT}/uploads:/app/uploads" \
     -v "${ROOT}/outputs:/app/outputs" \
     -v "${ROOT}/sample_data:/app/sample_data:ro" \
@@ -166,8 +178,20 @@ compose_up() {
   if [[ "$rebuild" == "1" ]]; then
     "${COMPOSE[@]}" build --no-cache
     "${COMPOSE[@]}" up -d
-  else
-    "${COMPOSE[@]}" up -d --build
+    return
+  fi
+
+  if image_exists; then
+    echo "Using existing image ${IMAGE} (app/ is bind-mounted, no rebuild needed)."
+    "${COMPOSE[@]}" up -d --no-build
+    return
+  fi
+
+  if ! "${COMPOSE[@]}" up -d --build; then
+    echo ""
+    echo "Build failed (registry unreachable?) and no local image is available." >&2
+    echo "Connect to the internet once, then retry: ./dev-start.sh rebuild" >&2
+    exit 1
   fi
 }
 
@@ -196,6 +220,18 @@ cmd_down() {
     "${COMPOSE[@]}" down
   fi
   echo "Stopped."
+}
+
+cmd_restart() {
+  need_docker
+  if docker ps -a --format '{{.Names}}' | grep -qx "$CONTAINER"; then
+    echo "Restarting ${CONTAINER} to pick up app/ changes…"
+    docker restart "$CONTAINER" >/dev/null
+    print_urls
+  else
+    echo "Container not running — starting it."
+    cmd_up
+  fi
 }
 
 cmd_logs() {
@@ -249,6 +285,7 @@ ACTION="${1:-up}"
 case "$ACTION" in
   up) cmd_up ;;
   down) cmd_down ;;
+  restart) cmd_restart ;;
   logs) cmd_logs ;;
   rebuild) cmd_rebuild ;;
   local) cmd_local ;;

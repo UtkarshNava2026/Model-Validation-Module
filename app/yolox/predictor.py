@@ -6,6 +6,7 @@ Uses official ValTransform preprocess and postprocess / demo_postprocess.
 from __future__ import annotations
 
 import logging
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +47,8 @@ class YOLOXPredictor:
         self.session = None
         self.model = None
         self.input_name = None
+        # Single-stream and live-grid callers share this model; forward is not thread-safe.
+        self._infer_lock = threading.Lock()
         self._load_model()
 
         # Keep model/exp class count for postprocess; only adjust display names
@@ -259,7 +262,8 @@ class YOLOXPredictor:
 
     def predict_frame(self, frame: np.ndarray) -> tuple[np.ndarray, int]:
         """Convenience: inference + visualize. Returns (annotated_bgr, num_dets)."""
-        output, img_info = self.inference(frame)
-        annotated = self.visual(output, img_info)
-        n = 0 if output is None else int(len(output))
-        return annotated, n
+        with self._infer_lock:
+            output, img_info = self.inference(frame)
+            annotated = self.visual(output, img_info)
+            n = 0 if output is None else int(len(output))
+            return annotated, n

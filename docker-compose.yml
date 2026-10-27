@@ -9,6 +9,9 @@ services:
     ports:
       - "0.0.0.0:${PORT:-7860}:7860"
     volumes:
+      # Live app code: edit on host, then `./dev-start.sh restart` — no rebuild needed
+      - ./app:/app/app
+      - ./run.py:/app/run.py:ro
       - ./uploads:/app/uploads
       - ./outputs:/app/outputs
       - ./sample_data:/app/sample_data:ro

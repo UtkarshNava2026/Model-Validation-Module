@@ -123,6 +123,111 @@ body {
   color: var(--muted);
 }
 
+.mode-switch {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: #fff;
+  gap: 2px;
+}
+
+.mode-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 650;
+  padding: 6px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.mode-btn.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.settings-toggle {
+  display: none;
+  appearance: none;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  padding: 8px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.settings-toggle.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.settings-scrim {
+  display: none;
+}
+
+.app.mode-live .settings-toggle {
+  display: inline-flex;
+  align-items: center;
+  position: relative;
+  z-index: 30;
+}
+
+.app.mode-live {
+  max-width: none;
+  padding: 12px 14px 14px;
+}
+
+.app.mode-live .brand p,
+.app.mode-live .classes,
+.app.mode-live #sessionMeta {
+  display: none;
+}
+
+.app.mode-live .layout {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.app.mode-live .panel {
+  display: none;
+}
+
+.app.mode-live .viewer {
+  min-height: calc(100vh - 92px);
+  padding: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.app.mode-live.settings-open .settings-scrim {
+  display: block !important;
+  position: fixed;
+  z-index: 20;
+  inset: 0;
+  background: rgba(21, 32, 25, 0.28);
+}
+
+.app.mode-live.settings-open .panel {
+  display: block;
+  position: fixed;
+  z-index: 25;
+  top: 74px;
+  left: 14px;
+  width: min(380px, calc(100vw - 28px));
+  max-height: calc(100vh - 92px);
+  overflow: auto;
+}
+
 .layout {
   display: grid;
   grid-template-columns: 320px minmax(0, 1fr);
@@ -175,6 +280,8 @@ body {
 
 .field input[type="file"],
 .field input[type="text"],
+.field input[type="password"],
+.field input[type="datetime-local"],
 .field select {
   width: 100%;
   border: 1px solid var(--line);
@@ -371,6 +478,214 @@ input[type="range"] {
   display: none;
 }
 
+.live-lead {
+  margin-top: 0;
+}
+
+.field-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.text-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+}
+
+.text-btn.active {
+  text-decoration: underline;
+}
+
+.playback-builder {
+  margin: -4px 0 14px;
+  padding: 10px 10px 6px;
+  border: 1px dashed rgba(15, 107, 76, 0.45);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.playback-builder[hidden] {
+  display: none !important;
+}
+
+.playback-lead {
+  margin-top: 0;
+}
+
+.live-actions {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.live-actions .btn.primary {
+  width: auto;
+}
+
+.live-grid {
+  display: none;
+  flex: 1;
+  min-height: min(78vh, 920px);
+  height: min(78vh, 920px);
+  gap: 10px;
+}
+
+.live-grid[hidden] {
+  display: none !important;
+}
+
+.app.mode-live .stage,
+.app.mode-live .single-only {
+  display: none;
+}
+
+.app.mode-live .live-grid {
+  display: grid;
+  min-height: calc(100vh - 100px);
+  height: calc(100vh - 100px);
+}
+
+.live-grid.idle,
+.live-grid.cols-1 {
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+}
+
+.live-grid.cols-2 {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr;
+}
+
+.live-grid.cols-3,
+.live-grid.cols-4 {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+
+.live-empty {
+  display: grid;
+  place-content: center;
+  gap: 6px;
+  text-align: center;
+  color: var(--muted);
+  padding: 24px;
+  border-radius: 12px;
+  background:
+    linear-gradient(45deg, #d5dbd2 25%, transparent 25%),
+    linear-gradient(-45deg, #d5dbd2 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #d5dbd2 75%),
+    linear-gradient(-45deg, transparent 75%, #d5dbd2 75%);
+  background-size: 24px 24px;
+  background-position: 0 0, 0 12px, 12px -12px, -12px 0;
+  background-color: #cfd6cb;
+}
+
+.live-empty[hidden] {
+  display: none !important;
+}
+
+.live-empty strong {
+  color: var(--ink);
+  font-size: 1.05rem;
+}
+
+.live-tile {
+  position: relative;
+  min-height: 0;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #101511;
+}
+
+.live-tile[hidden] {
+  display: none !important;
+}
+
+.live-tile img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  background: #101511;
+}
+
+.live-tile-wait {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 0.85rem;
+  pointer-events: none;
+}
+
+.live-tile.has-frame .live-tile-wait,
+.live-tile-wait[hidden] {
+  display: none !important;
+}
+
+.live-tile-error {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  top: 8px;
+  z-index: 1;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(180, 35, 24, 0.92);
+  color: #fff;
+  font-size: 0.75rem;
+  text-align: center;
+}
+
+.live-tile.is-error:not(.has-frame) .live-tile-error {
+  inset: 0;
+  display: grid;
+  place-content: center;
+  border-radius: 0;
+  background: rgba(16, 21, 17, 0.78);
+}
+
+.live-tile-error[hidden] {
+  display: none !important;
+}
+
+.live-tile-hud {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(16, 21, 17, 0.72);
+  color: #f4f6f2;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+}
+
+.live-label,
+.live-stats {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.live-label {
+  font-weight: 600;
+}
+
 .timeline {
   display: grid;
   grid-template-columns: auto 1fr auto;
@@ -546,9 +861,14 @@ input[type="range"] {
     min-height: calc(100vh - 160px);
   }
 
-  .stage {
+  .stage,
+  .live-grid {
     min-height: min(62vh, 640px);
     height: min(62vh, 640px);
+  }
+
+  .live-tile {
+    min-height: 160px;
   }
 
   .topbar {

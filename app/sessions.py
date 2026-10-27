@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from app.storage import clear_session_scratch
+from app.stream.live_grid import LiveGrid
 from app.stream.processor import StreamProcessor
 
 MAX_SESSIONS = int(os.environ.get("MAX_SESSIONS", "3"))
@@ -28,6 +29,7 @@ NEW_SESSION_GRACE_SEC = int(os.environ.get("NEW_SESSION_GRACE_SEC", "180"))  # 3
 class UserSession:
     session_id: str
     processor: StreamProcessor
+    live_grid: LiveGrid = field(default_factory=LiveGrid)
     created_at: float = field(default_factory=time.time)
     last_seen: float = field(default_factory=time.time)
 
@@ -36,9 +38,12 @@ class UserSession:
 
     def close(self) -> None:
         try:
-            self.processor.close()
+            self.live_grid.stop()
         finally:
-            clear_session_scratch(self.session_id)
+            try:
+                self.processor.close()
+            finally:
+                clear_session_scratch(self.session_id)
 
 
 class SessionManager:
@@ -162,6 +167,7 @@ class SessionManager:
                         "idle_sec": round(time.time() - s.last_seen, 1),
                         "has_model": s.processor.predictor is not None,
                         "source_type": s.processor.status().get("source_type"),
+                        "live_running": s.live_grid.is_running,
                     }
                     for s in self._sessions.values()
                 ],

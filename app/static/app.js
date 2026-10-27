@@ -49,6 +49,20 @@
     timeCurrent: $("timeCurrent"),
     timeDuration: $("timeDuration"),
     speedSelect: $("speedSelect"),
+    modeSingle: $("modeSingle"),
+    modeLive: $("modeLive"),
+    singleSource: $("singleSource"),
+    liveSource: $("liveSource"),
+    liveGrid: $("liveGrid"),
+    liveEmpty: $("liveEmpty"),
+    liveMsg: $("liveMsg"),
+    btnLiveStart: $("btnLiveStart"),
+    btnLiveStop: $("btnLiveStop"),
+    playbackBuilder: $("playbackBuilder"),
+    pbApply: $("pbApply"),
+    pbMsg: $("pbMsg"),
+    btnSettings: $("btnSettings"),
+    settingsScrim: $("settingsScrim"),
   };
 
   const SESSION_KEY = "nava_mv_session_id";
@@ -58,6 +72,10 @@
   let modelReady = false;
   let scrubbing = false;
   let lastSeekable = false;
+  let viewMode = "single";
+  let modeChosen = false;
+  let liveTilesConnected = 0;
+  let settingsOpen = false;
 
   function rememberSession(id) {
     if (!id) return;
@@ -164,6 +182,10 @@
       els.confVal.textContent = Number(data.conf).toFixed(2);
       els.nmsVal.textContent = Number(data.nms).toFixed(2);
       renderClasses(data.class_names || []);
+      if (viewMode === "live") {
+        clearLiveTiles();
+        setHint(els.liveMsg, "Model reloaded. Start feeds again.", "ok");
+      }
       setHint(
         els.loadMsg,
         `Loaded (${data.backend}) on ${data.device}${data.fp16 ? " FP16" : ""} · ${data.num_classes} classes · input ${data.test_size}`,
@@ -451,6 +473,287 @@
     }
   }
 
+  function applyChrome(mode) {
+    viewMode = mode === "live" ? "live" : "single";
+    const live = viewMode === "live";
+    document.querySelector(".app").classList.toggle("mode-live", live);
+    if (els.singleSource) els.singleSource.hidden = live;
+    if (els.liveSource) els.liveSource.hidden = !live;
+    if (els.liveGrid) els.liveGrid.hidden = !live;
+    if (els.modeSingle) {
+      els.modeSingle.classList.toggle("active", !live);
+      els.modeSingle.setAttribute("aria-pressed", String(!live));
+    }
+    if (els.modeLive) {
+      els.modeLive.classList.toggle("active", live);
+      els.modeLive.setAttribute("aria-pressed", String(live));
+    }
+    const heading = document.getElementById("sourceHeading");
+    if (heading) heading.textContent = live ? "2 · Live feeds" : "2 · Input source";
+    if (!live) setSettingsOpen(false);
+  }
+
+  function setSettingsOpen(open) {
+    settingsOpen = viewMode === "live" && !!open;
+    document.querySelector(".app").classList.toggle("settings-open", settingsOpen);
+    if (els.btnSettings) {
+      els.btnSettings.classList.toggle("active", settingsOpen);
+      els.btnSettings.setAttribute("aria-expanded", String(settingsOpen));
+      els.btnSettings.textContent = settingsOpen ? "Close" : "Settings";
+    }
+    if (els.settingsScrim) els.settingsScrim.hidden = !settingsOpen;
+  }
+
+  function clearLiveTiles() {
+    liveTilesConnected = 0;
+    if (!els.liveGrid) return;
+    els.liveGrid.classList.remove("cols-1", "cols-2", "cols-3", "cols-4");
+    els.liveGrid.classList.add("idle");
+    if (els.liveEmpty) els.liveEmpty.hidden = false;
+    els.liveGrid.querySelectorAll(".live-tile").forEach((tile) => {
+      tile.hidden = true;
+      tile.classList.remove("has-frame", "is-error");
+      const img = tile.querySelector("img");
+      if (img) {
+        img.onerror = null;
+        img.removeAttribute("src");
+      }
+      const err = tile.querySelector(".live-tile-error");
+      if (err) {
+        err.hidden = true;
+        err.textContent = "";
+      }
+      const wait = tile.querySelector(".live-tile-wait");
+      if (wait) wait.hidden = false;
+    });
+  }
+
+  function attachLiveImage(img, slot) {
+    let attempt = 0;
+    img.onerror = () => {
+      if (viewMode !== "live" || liveTilesConnected <= slot) return;
+      attempt += 1;
+      const wait = Math.min(8000, 700 * attempt);
+      window.setTimeout(() => {
+        if (viewMode !== "live" || liveTilesConnected <= slot) return;
+        img.src = withSessionQuery(`/api/live/stream/${slot}?ts=${Date.now()}`);
+      }, wait);
+    };
+    img.src = withSessionQuery(`/api/live/stream/${slot}?ts=${Date.now()}`);
+  }
+
+  function connectLiveTiles(count) {
+    const n = Math.max(0, Math.min(4, Number(count) || 0));
+    if (!n || !els.liveGrid || liveTilesConnected === n) return;
+    liveTilesConnected = n;
+    els.liveGrid.classList.remove("idle", "cols-1", "cols-2", "cols-3", "cols-4");
+    els.liveGrid.classList.add(`cols-${n}`);
+    if (els.liveEmpty) els.liveEmpty.hidden = true;
+    els.liveGrid.querySelectorAll(".live-tile").forEach((tile, i) => {
+      const img = tile.querySelector("img");
+      tile.hidden = i >= n;
+      if (i < n && img) {
+        attachLiveImage(img, i);
+      } else if (img) {
+        img.onerror = null;
+        img.removeAttribute("src");
+      }
+    });
+  }
+
+  function updateLiveHUD(live) {
+    if (!live) return;
+    const slots = live.slots || [];
+    const running = !!live.running;
+    const allDown = slots.length > 0 && slots.every((slot) => slot.error && !slot.has_frame);
+    els.statusPill.textContent = running ? "live" : (modelReady ? "ready" : (live.status || "idle"));
+    els.statusPill.classList.remove("playing", "error");
+    if (running && !allDown) els.statusPill.classList.add("playing");
+    if (allDown) els.statusPill.classList.add("error");
+
+    const fpsVals = slots.map((slot) => Number(slot.fps)).filter((n) => n > 0);
+    const dets = slots.reduce((sum, slot) => sum + (Number(slot.detections) || 0), 0);
+    els.fpsMeta.textContent = fpsVals.length
+      ? `FPS ${(fpsVals.reduce((a, b) => a + b, 0) / fpsVals.length).toFixed(1)}`
+      : "FPS —";
+    els.detMeta.textContent = running || slots.some((slot) => slot.has_frame)
+      ? `Dets ${dets}`
+      : "Dets —";
+
+    if (running && slots.length) connectLiveTiles(slots.length);
+    else if (!running && liveTilesConnected) clearLiveTiles();
+
+    slots.forEach((slot) => {
+      const tile = els.liveGrid.querySelector(`.live-tile[data-slot="${slot.index}"]`);
+      if (!tile) return;
+      const label = tile.querySelector(".live-label");
+      const stats = tile.querySelector(".live-stats");
+      const err = tile.querySelector(".live-tile-error");
+      const wait = tile.querySelector(".live-tile-wait");
+      if (label) label.textContent = slot.label || `Cam ${slot.index + 1}`;
+      if (stats) {
+        const fps = slot.fps ? Number(slot.fps).toFixed(1) : "—";
+        stats.textContent = `FPS ${fps} · Dets ${slot.detections ?? "—"}`;
+      }
+      tile.classList.toggle("has-frame", !!slot.has_frame);
+      tile.classList.toggle("is-error", !!slot.error);
+      if (err) {
+        err.hidden = !slot.error;
+        err.textContent = slot.error || "";
+      }
+      if (wait) wait.hidden = !!slot.has_frame || !!slot.error;
+    });
+  }
+
+  async function setMode(mode) {
+    if (mode === viewMode) return;
+    modeChosen = true;
+    if (mode === "live") {
+      streamMode = false;
+      applyChrome("live");
+      try {
+        await api("/api/control/stop", { method: "POST" });
+      } catch (_) {
+        /* single source may already be idle */
+      }
+      return;
+    }
+    clearLiveTiles();
+    applyChrome("single");
+    try {
+      await api("/api/live/stop", { method: "POST" });
+    } catch (err) {
+      setHint(els.sourceMsg, err.message, "error");
+    }
+  }
+
+  let playbackTargetId = "";
+
+  function hikStamp(value) {
+    const match = String(value || "").match(
+      /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/
+    );
+    if (!match) return "";
+    const seconds = match[6] || "00";
+    return `${match[1]}${match[2]}${match[3]}T${match[4]}${match[5]}${seconds}Z`;
+  }
+
+  function buildPlaybackUrl() {
+    const ip = ($("pbIp").value || "").trim();
+    const user = ($("pbUser").value || "").trim();
+    const password = $("pbPass").value || "";
+    const channel = ($("pbChannel").value || "").trim();
+    const start = hikStamp($("pbStart").value);
+    const end = hikStamp($("pbEnd").value);
+    if (!ip || !user || !password || !channel || !start || !end) {
+      throw new Error("Enter IP, user, password, channel, start, and end.");
+    }
+    if (!/^\d+$/.test(channel)) {
+      throw new Error("Channel should be a number, for example 101.");
+    }
+    if (end <= start) {
+      throw new Error("End must be after the start time.");
+    }
+    let host = ip.replace(/^rtsp:\/\//i, "").split("/")[0].trim();
+    if (!host || /[\s@/?#]/.test(host)) {
+      throw new Error("Enter the camera IP address only, for example 192.168.1.10.");
+    }
+    const authority = host.includes(":") ? host : `${host}:554`;
+    return (
+      `rtsp://${encodeURIComponent(user)}:${encodeURIComponent(password)}` +
+      `@${authority}/Streaming/tracks/${channel}?starttime=${start}&endtime=${end}`
+    );
+  }
+
+  function openPlaybackBuilder(inputId, button) {
+    const input = document.getElementById(inputId);
+    const builder = els.playbackBuilder;
+    if (!input || !builder) return;
+    if (playbackTargetId === inputId && !builder.hidden) {
+      builder.hidden = true;
+      playbackTargetId = "";
+      document.querySelectorAll("[data-playback-for]").forEach((el) => {
+        el.classList.remove("active");
+      });
+      return;
+    }
+    playbackTargetId = inputId;
+    input.closest(".field").insertAdjacentElement("afterend", builder);
+    builder.hidden = false;
+    document.querySelectorAll("[data-playback-for]").forEach((el) => {
+      el.classList.toggle("active", el === button);
+    });
+    setHint(els.pbMsg, "");
+    $("pbIp").focus();
+  }
+
+  function applyPlaybackUrl() {
+    const input = document.getElementById(playbackTargetId);
+    if (!input) {
+      setHint(els.pbMsg, "Choose a camera first.", "error");
+      return;
+    }
+    try {
+      input.value = buildPlaybackUrl();
+      setHint(els.pbMsg, "Playback URL placed in this camera field.", "ok");
+    } catch (err) {
+      setHint(els.pbMsg, err.message, "error");
+    }
+  }
+
+  function liveUrls() {
+    return [0, 1, 2, 3]
+      .map((i) => {
+        const input = document.getElementById(`liveUrl${i}`);
+        return input ? input.value.trim() : "";
+      })
+      .filter(Boolean);
+  }
+
+  async function startLive() {
+    if (!modelReady) {
+      setHint(els.liveMsg, "Load the model first.", "error");
+      return;
+    }
+    const urls = liveUrls();
+    if (!urls.length) {
+      setHint(els.liveMsg, "Enter at least one RTSP URL.", "error");
+      return;
+    }
+    els.btnLiveStart.disabled = true;
+    setHint(els.liveMsg, "Connecting cameras…");
+    try {
+      const data = await api("/api/live/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ urls }),
+      });
+      const n = data.slot_count || urls.length;
+      connectLiveTiles(n);
+      updateLiveHUD(data);
+      setHint(
+        els.liveMsg,
+        n === 1 ? "Live on 1 camera." : `Live on ${n} cameras.`,
+        "ok"
+      );
+    } catch (err) {
+      setHint(els.liveMsg, err.message, "error");
+    } finally {
+      els.btnLiveStart.disabled = false;
+    }
+  }
+
+  async function stopLive() {
+    try {
+      const data = await api("/api/live/stop", { method: "POST" });
+      clearLiveTiles();
+      updateLiveHUD(data);
+      setHint(els.liveMsg, "Feeds stopped.", "ok");
+    } catch (err) {
+      setHint(els.liveMsg, err.message, "error");
+    }
+  }
+
   function updateStatusUI(s) {
     if (!s) return;
     if (s.session_id) rememberSession(s.session_id);
@@ -483,8 +786,20 @@
   async function pollStatus() {
     try {
       const s = await api("/api/status");
-      updateStatusUI(s);
       if (s.model_loaded) modelReady = true;
+      if (!modeChosen && s.live && s.live.running && viewMode !== "live") {
+        applyChrome("live");
+      }
+      if (viewMode === "live") {
+        if (s.session_id) rememberSession(s.session_id);
+        if (els.sessionMeta && s.sessions) {
+          els.sessionMeta.textContent =
+            `session ${(s.session_id || sessionId).slice(0, 8)} · ${s.sessions.active_sessions}/${s.sessions.max_sessions} users`;
+        }
+        updateLiveHUD(s.live);
+        return;
+      }
+      updateStatusUI(s);
       if (!streamMode && (s.source_type === "image" || s.source_type === "image_dir")) {
         // keep still image / gallery frame
       } else if (s.playing || s.status === "ready" || s.status === "paused") {
@@ -518,7 +833,7 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ conf }),
       });
-      if (!streamMode) refreshStill();
+      if (viewMode !== "live" && !streamMode) refreshStill();
     } catch (err) {
       setHint(els.sourceMsg, err.message, "error");
     }
@@ -532,7 +847,7 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ nms }),
       });
-      if (!streamMode) refreshStill();
+      if (viewMode !== "live" && !streamMode) refreshStill();
     } catch (err) {
       setHint(els.sourceMsg, err.message, "error");
     }
@@ -558,6 +873,22 @@
   }, 120);
 
   els.btnLoad.addEventListener("click", uploadModel);
+  if (els.modeSingle) els.modeSingle.addEventListener("click", () => setMode("single"));
+  if (els.modeLive) els.modeLive.addEventListener("click", () => setMode("live"));
+  document.querySelectorAll("[data-playback-for]").forEach((button) => {
+    button.addEventListener("click", () => {
+      openPlaybackBuilder(button.dataset.playbackFor, button);
+    });
+  });
+  if (els.pbApply) els.pbApply.addEventListener("click", applyPlaybackUrl);
+  if (els.btnLiveStart) els.btnLiveStart.addEventListener("click", startLive);
+  if (els.btnLiveStop) els.btnLiveStop.addEventListener("click", stopLive);
+  if (els.btnSettings) {
+    els.btnSettings.addEventListener("click", () => setSettingsOpen(!settingsOpen));
+  }
+  if (els.settingsScrim) {
+    els.settingsScrim.addEventListener("click", () => setSettingsOpen(false));
+  }
   els.btnOpenImage.addEventListener("click", () => openFileSource(els.imageFile, "image"));
   els.btnOpenFolder.addEventListener("click", openFolderUpload);
   els.btnOpenDirPath.addEventListener("click", openDirPath);

@@ -6,6 +6,7 @@ Multi-user: each browser gets an isolated session (own model / stream / controls
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import time
@@ -18,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from app.sessions import UserSession, session_manager
+from app.stream.live_grid import redact_text, validate_live_url
 from app.storage import save_bytes_stream, save_gallery
 from app.yolox.predictor import YOLOXPredictor
 
@@ -70,6 +72,10 @@ class GotoImageBody(BaseModel):
 
 class RecordBody(BaseModel):
     duration_sec: Optional[float] = Field(None, ge=0, le=3600)
+
+
+class LiveStartBody(BaseModel):
+    urls: list[str] = Field(..., min_length=1, max_length=4)
 
 
 def _session_response(extra: dict | None = None, sess: UserSession | None = None) -> dict:
@@ -133,7 +139,10 @@ async def _save_upload(file: UploadFile, prefix: str, session_id: str) -> Path:
 
 @app.get("/")
 async def index():
-    return FileResponse(STATIC_DIR / "index.html")
+    return FileResponse(
+        STATIC_DIR / "index.html",
+        headers={"Cache-Control": "no-cache"},
+    )
 
 
 @app.post("/api/session")
@@ -191,6 +200,10 @@ async def upload_model(
         weight_path = await _save_upload(weight, "weight", sess.session_id)
         class_path = await _save_upload(classes, "classes", sess.session_id)
         exp_path = await _save_upload(exp, "exp", sess.session_id)
+
+        # Drop live cameras before freeing the model they share.
+        sess.live_grid.stop()
+        sess.processor.set_defer_reprocess(False)
 
         # Free previous model in this session before loading a new one
         old = sess.processor.predictor
@@ -494,6 +507,98 @@ async def system_info():
     }
 
 
+@app.post("/api/live/start")
+async def live_start(body: LiveStartBody, sess: UserSession = Depends(require_session)):
+    """Run the loaded model on 1–4 RTSP URLs. Stops single-source playback first."""
+    urls = [url.strip() for url in body.urls if url and url.strip()]
+    if not urls:
+        raise HTTPException(status_code=400, detail="Provide at least one RTSP URL")
+    if len(urls) > 4:
+        raise HTTPException(status_code=400, detail="At most 4 RTSP URLs")
+    try:
+        urls = [validate_live_url(url) for url in urls]
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if sess.processor.predictor is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Load model weights / classes / experiment first",
+        )
+
+    def _start() -> dict:
+        sess.processor.park_for_live()
+        sess.live_grid.start(sess.processor.predictor, urls)
+        return sess.live_grid.status()
+
+    def _abort() -> None:
+        sess.live_grid.stop()
+        sess.processor.resume_after_live()
+
+    try:
+        # Camera open/stop can block. Keep it off the event loop so status polls still answer.
+        status = await asyncio.to_thread(_start)
+        return _session_response({"ok": True, **status}, sess)
+    except Exception as exc:
+        await asyncio.to_thread(_abort)
+        logger.exception("Failed to start live grid")
+        raise HTTPException(status_code=400, detail=redact_text(str(exc)) or "Could not start live feeds") from exc
+
+
+@app.post("/api/live/stop")
+async def live_stop(sess: UserSession = Depends(require_session)):
+    def _stop() -> dict:
+        sess.live_grid.stop()
+        sess.processor.resume_after_live()
+        return sess.live_grid.status()
+
+    status = await asyncio.to_thread(_stop)
+    return _session_response({"ok": True, **status}, sess)
+
+
+@app.get("/api/live/status")
+async def live_status(sess: UserSession = Depends(require_session)):
+    return _session_response(sess.live_grid.status(), sess)
+
+
+@app.get("/api/live/stream/{slot}")
+async def live_stream(slot: int, sess: UserSession = Depends(require_session)):
+    """Multipart MJPEG for one live-grid tile."""
+    if slot < 0 or slot > 3:
+        raise HTTPException(status_code=404, detail="Slot out of range")
+    boundary = "frame"
+    grid = sess.live_grid
+
+    def gen():
+        last = None
+        idle_loops = 0
+        while True:
+            data = grid.get_jpeg(slot)
+            if data is None:
+                idle_loops += 1
+                # Stay open while this camera is still connecting.
+                if not grid.is_running and idle_loops > 10:
+                    break
+                time.sleep(0.05)
+                continue
+            idle_loops = 0
+            if not grid.is_running:
+                break
+            if data is last:
+                time.sleep(0.03)
+                continue
+            last = data
+            yield (
+                b"--" + boundary.encode() + b"\r\n"
+                b"Content-Type: image/jpeg\r\n\r\n" + data + b"\r\n"
+            )
+            time.sleep(0.02)
+
+    return StreamingResponse(
+        gen(),
+        media_type=f"multipart/x-mixed-replace; boundary={boundary}",
+    )
+
+
 @app.get("/api/status")
 async def status(
     x_session_id: Optional[str] = Header(default=None, alias="X-Session-Id"),
@@ -520,6 +625,7 @@ async def status(
     st = sess.processor.status()
     pred = sess.processor.predictor
     st["device"] = getattr(pred, "device", None) if pred else None
+    st["live"] = sess.live_grid.status()
     return _session_response(st, sess)
 
 

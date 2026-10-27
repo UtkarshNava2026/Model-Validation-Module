@@ -12,6 +12,9 @@ from typing import Optional
 import cv2
 import numpy as np
 
+from app.stream.capture import open_capture
+from app.stream.live_grid import redact_text
+
 logger = logging.getLogger(__name__)
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
@@ -61,6 +64,8 @@ class StreamProcessor:
         self._record_frames = 0
         self._record_dir = Path(__file__).resolve().parents[2] / "outputs" / "recordings"
         self._record_dir.mkdir(parents=True, exist_ok=True)
+        # Live grid owns inference; skip re-running the hidden single frame on slider moves.
+        self._defer_reprocess = False
 
     # ---- state helpers ----
     def status(self) -> dict:
@@ -123,19 +128,56 @@ class StreamProcessor:
     def predictor(self):
         return self._predictor
 
+    def set_defer_reprocess(self, defer: bool) -> None:
+        """When true, threshold changes apply on the next live frame only."""
+        with self._lock:
+            self._defer_reprocess = bool(defer)
+
+    def park_for_live(self) -> None:
+        """Stop single-source playback so the live grid can use the same model."""
+        self.stop()
+        with self._lock:
+            self._defer_reprocess = True
+            if self._predictor is not None:
+                self._status = "model_ready"
+                self._error = None
+
+    def resume_after_live(self) -> None:
+        """Live grid released the model; single mode can use it again."""
+        with self._lock:
+            self._defer_reprocess = False
+            if self._predictor is not None and self._cap is None and not self._playing:
+                self._status = "model_ready"
+                self._error = None
+
     def set_conf(self, conf: float):
         with self._lock:
             if self._predictor is None:
                 raise RuntimeError("Model not loaded")
             self._predictor.set_conf(conf)
-            self._reprocess_current()
+            if not self._defer_reprocess:
+                self._reprocess_current()
 
     def set_nms(self, nms: float):
         with self._lock:
             if self._predictor is None:
                 raise RuntimeError("Model not loaded")
             self._predictor.set_nms(nms)
-            self._reprocess_current()
+            if not self._defer_reprocess:
+                self._reprocess_current()
+
+    def close(self) -> None:
+        """Release capture and drop the model reference. Does not delete weight files."""
+        self.stop()
+        with self._lock:
+            self._predictor = None
+            self._latest_jpeg = None
+            self._latest_frame = None
+            self._last_raw = None
+            self._source_image = None
+            self._defer_reprocess = False
+            self._status = "idle"
+            self._error = None
 
     def set_speed(self, speed: float):
         """Playback speed multiplier (0.25x – 8x)."""
@@ -354,6 +396,24 @@ class StreamProcessor:
             if self._predictor is None:
                 raise RuntimeError("Load model weights / classes / experiment first")
 
+        # Open outside the state lock so a slow camera does not freeze status polls.
+        cap = None
+        if st != SourceType.IMAGE:
+            cap = open_capture(source)
+            if cap is None:
+                if st == SourceType.RTSP:
+                    raise ValueError(
+                        "Could not open that RTSP stream. Check the URL, "
+                        "credentials, and that the camera is reachable."
+                    )
+                raise ValueError(f"Could not open source: {source}")
+
+        with self._lock:
+            if self._predictor is None:
+                if cap is not None:
+                    cap.release()
+                raise RuntimeError("Load model weights / classes / experiment first")
+
             self._error = None
             self._source_type = st
             self._source_path = source
@@ -380,14 +440,6 @@ class StreamProcessor:
                 return
 
             self._source_image = None
-
-            cap = cv2.VideoCapture(source)
-            if not cap.isOpened():
-                raise ValueError(f"Could not open source: {source}")
-
-            if st == SourceType.RTSP:
-                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-
             self._cap = cap
             src_fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
             self._source_fps = src_fps if src_fps > 1e-3 else 25.0
@@ -530,7 +582,7 @@ class StreamProcessor:
             except Exception as exc:
                 logger.exception("Inference error")
                 with self._lock:
-                    self._error = str(exc)
+                    self._error = redact_text(str(exc))
                     self._playing = False
                     self._status = "error"
                 break

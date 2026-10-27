@@ -7,11 +7,12 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/style.css?v=live5" />
 </head>
 <body>
   <div class="app">
     <header class="topbar">
+      <button type="button" id="btnSettings" class="settings-toggle" aria-expanded="false" aria-controls="settingsPanel">Settings</button>
       <div class="brand">
         <span class="brand-mark"></span>
         <div>
@@ -20,6 +21,10 @@
         </div>
       </div>
       <div class="top-meta" id="topMeta">
+        <div class="mode-switch" role="group" aria-label="Inference mode">
+          <button type="button" id="modeSingle" class="mode-btn active" aria-pressed="true">Single</button>
+          <button type="button" id="modeLive" class="mode-btn" aria-pressed="false">Live feeds</button>
+        </div>
         <span class="pill" id="statusPill">idle</span>
         <span class="meta" id="fpsMeta">FPS —</span>
         <span class="meta" id="detMeta">Dets —</span>
@@ -27,8 +32,9 @@
       </div>
     </header>
 
+    <div class="settings-scrim" id="settingsScrim" hidden></div>
     <main class="layout">
-      <aside class="panel">
+      <aside class="panel" id="settingsPanel">
         <section class="block">
           <h2>1 · Model files</h2>
           <label class="field">
@@ -57,7 +63,8 @@
         </section>
 
         <section class="block">
-          <h2>2 · Input source</h2>
+          <h2 id="sourceHeading">2 · Input source</h2>
+          <div id="singleSource">
           <div class="tabs tabs-4" role="tablist">
             <button class="tab active" data-tab="image" type="button">Image</button>
             <button class="tab" data-tab="folder" type="button">Folder</button>
@@ -100,13 +107,82 @@
           </div>
 
           <div class="tab-pane" id="pane-rtsp">
-            <label class="field">
-              <span>RTSP / URL (live or playback)</span>
-              <input type="text" id="rtspUrl" placeholder="rtsp://user:pass@host:554/stream" />
-            </label>
+            <div class="field">
+              <div class="field-head">
+                <span>RTSP / URL (live or playback)</span>
+                <button type="button" class="text-btn" data-playback-for="rtspUrl">Build playback</button>
+              </div>
+              <input type="text" id="rtspUrl" placeholder="rtsp://user:pass@host:554/stream" autocomplete="off" />
+            </div>
             <button class="btn" id="btnOpenRtsp" type="button">Connect</button>
           </div>
           <p class="hint" id="sourceMsg"></p>
+          </div>
+          <div id="liveSource" hidden>
+            <p class="hint live-lead">Same model on up to four RTSP cameras.</p>
+            <div class="field">
+              <div class="field-head">
+                <span>RTSP 1</span>
+                <button type="button" class="text-btn" data-playback-for="liveUrl0">Build playback</button>
+              </div>
+              <input type="text" id="liveUrl0" placeholder="rtsp://user:pass@host:554/stream1" autocomplete="off" />
+            </div>
+            <div class="field">
+              <div class="field-head">
+                <span>RTSP 2</span>
+                <button type="button" class="text-btn" data-playback-for="liveUrl1">Build playback</button>
+              </div>
+              <input type="text" id="liveUrl1" placeholder="rtsp://user:pass@host:554/stream2" autocomplete="off" />
+            </div>
+            <div class="field">
+              <div class="field-head">
+                <span>RTSP 3</span>
+                <button type="button" class="text-btn" data-playback-for="liveUrl2">Build playback</button>
+              </div>
+              <input type="text" id="liveUrl2" placeholder="rtsp://user:pass@host:554/stream3" autocomplete="off" />
+            </div>
+            <div class="field">
+              <div class="field-head">
+                <span>RTSP 4</span>
+                <button type="button" class="text-btn" data-playback-for="liveUrl3">Build playback</button>
+              </div>
+              <input type="text" id="liveUrl3" placeholder="rtsp://user:pass@host:554/stream4" autocomplete="off" />
+            </div>
+            <div class="playback-builder" id="playbackBuilder" hidden>
+              <p class="hint playback-lead">Hikvision playback URL for this camera.</p>
+              <label class="field">
+                <span>IP address</span>
+                <input type="text" id="pbIp" placeholder="192.168.1.10" autocomplete="off" />
+              </label>
+              <label class="field">
+                <span>User</span>
+                <input type="text" id="pbUser" autocomplete="off" />
+              </label>
+              <label class="field">
+                <span>Password</span>
+                <input type="password" id="pbPass" autocomplete="new-password" />
+              </label>
+              <label class="field">
+                <span>Channel</span>
+                <input type="text" id="pbChannel" value="101" inputmode="numeric" />
+              </label>
+              <label class="field">
+                <span>Start</span>
+                <input type="datetime-local" id="pbStart" step="1" />
+              </label>
+              <label class="field">
+                <span>End</span>
+                <input type="datetime-local" id="pbEnd" step="1" />
+              </label>
+              <button class="btn" id="pbApply" type="button">Use playback URL</button>
+              <p class="hint" id="pbMsg"></p>
+            </div>
+            <div class="live-actions">
+              <button class="btn primary" id="btnLiveStart" type="button">Start feeds</button>
+              <button class="btn ghost" id="btnLiveStop" type="button">Stop</button>
+            </div>
+            <p class="hint" id="liveMsg"></p>
+          </div>
         </section>
 
         <section class="block">
@@ -136,7 +212,49 @@
             <span>Load a model, then open an image, folder, video, or RTSP source.</span>
           </div>
         </div>
-        <div class="timeline" id="timelineWrap">
+        <div class="live-grid idle" id="liveGrid" hidden>
+          <div class="live-empty" id="liveEmpty">
+            <strong>No live feeds</strong>
+            <span>Open Settings to load a model and add up to four RTSP cameras.</span>
+          </div>
+          <article class="live-tile" data-slot="0" hidden>
+            <img alt="Camera 1" />
+            <div class="live-tile-wait">Connecting…</div>
+            <div class="live-tile-error" hidden></div>
+            <div class="live-tile-hud">
+              <span class="live-label">Cam 1</span>
+              <span class="live-stats">FPS — · Dets —</span>
+            </div>
+          </article>
+          <article class="live-tile" data-slot="1" hidden>
+            <img alt="Camera 2" />
+            <div class="live-tile-wait">Connecting…</div>
+            <div class="live-tile-error" hidden></div>
+            <div class="live-tile-hud">
+              <span class="live-label">Cam 2</span>
+              <span class="live-stats">FPS — · Dets —</span>
+            </div>
+          </article>
+          <article class="live-tile" data-slot="2" hidden>
+            <img alt="Camera 3" />
+            <div class="live-tile-wait">Connecting…</div>
+            <div class="live-tile-error" hidden></div>
+            <div class="live-tile-hud">
+              <span class="live-label">Cam 3</span>
+              <span class="live-stats">FPS — · Dets —</span>
+            </div>
+          </article>
+          <article class="live-tile" data-slot="3" hidden>
+            <img alt="Camera 4" />
+            <div class="live-tile-wait">Connecting…</div>
+            <div class="live-tile-error" hidden></div>
+            <div class="live-tile-hud">
+              <span class="live-label">Cam 4</span>
+              <span class="live-stats">FPS — · Dets —</span>
+            </div>
+          </article>
+        </div>
+        <div class="timeline single-only" id="timelineWrap">
           <span class="time-label" id="timeCurrent">0:00</span>
           <input
             type="range"
@@ -150,12 +268,12 @@
           />
           <span class="time-label" id="timeDuration">0:00</span>
         </div>
-        <div class="gallery-nav" id="galleryNav" hidden>
+        <div class="gallery-nav single-only" id="galleryNav" hidden>
           <button class="btn icon" id="btnPrevImage" type="button" title="Previous image (←)">← Prev</button>
           <span class="gallery-info" id="galleryInfo">image —</span>
           <button class="btn icon" id="btnNextImage" type="button" title="Next image (→)">Next →</button>
         </div>
-        <div class="record-bar">
+        <div class="record-bar single-only">
           <label class="toggle">
             <input type="checkbox" id="recordToggle" />
             <span>Download inference video</span>
@@ -167,7 +285,7 @@
           <span class="record-status" id="recordStatus">off</span>
           <a class="btn icon" id="btnDownload" href="/api/record/download" hidden>⬇ Download</a>
         </div>
-        <div class="controls">
+        <div class="controls single-only">
           <button class="btn icon" id="btnPlay" type="button" title="Play">▶ Play</button>
           <button class="btn icon" id="btnPause" type="button" title="Pause">❚❚ Pause</button>
           <button class="btn icon ghost" id="btnStop" type="button" title="Stop">■ Stop</button>
@@ -192,6 +310,6 @@
       </section>
     </main>
   </div>
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=live5"></script>
 </body>
 </html>
